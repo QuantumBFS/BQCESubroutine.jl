@@ -12,6 +12,7 @@ PaddedMatrices = "aaaacae8-1622-11e9-2a5c-532679323890"
 YaoLocations = "66df03fb-d475-48f7-b449-3d9064bf085b"
 
 [compat]
+MatchCore = "0.1"
 julia = "1"
 
 [extras]
