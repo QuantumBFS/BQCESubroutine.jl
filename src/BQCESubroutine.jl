@@ -37,6 +37,7 @@ include("utils.jl")
 using .Utilities
 
 include("codegen/broutine.jl")
+include("mul.jl")
 include("statevector.jl")
 
 end

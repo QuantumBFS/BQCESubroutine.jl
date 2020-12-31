@@ -570,6 +570,12 @@ function broutine!(st::CuVector{T}, U::AbstractMatrix, locs::Tuple{Int}, ctrl_lo
     return st
 end
 
+using SymEngine
+
+@vars α θ
+st = Basic[1, α, 0, 0]
+broutine!(st, [exp(-im * θ) 0; 0 exp(im * θ)], (1, ))
+
 using BenchmarkTools
 
 data = Dict(

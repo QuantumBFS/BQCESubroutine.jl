@@ -148,121 +148,134 @@ end
 
 function codegen_broutine2x2(m::Module, x::BitRoutine)
     ex = Expr(:block)
-    push!(ex.args, codegen_broutine2x2_generic(m, x))
+    push!(ex.args, codegen_broutine2x2_generic(x))
 
     # repeat gate multi qubit routines
     if isdiag(x.expr)
-        push!(ex.args, codegen_broutine2x2_diag(m, x))
+        push!(ex.args, codegen_broutine2x2_diag(x))
     elseif isperm(x.expr)
-        push!(ex.args, codegen_broutine2x2_perm(m, x))
+        push!(ex.args, codegen_broutine2x2_perm(x))
     else
-        push!(ex.args, codegen_broutine2x2_dense(m, x))
+        push!(ex.args, codegen_broutine2x2_dense(x))
     end
     return ex
 end
 
-function codegen_broutine2x2_generic(m::Module, ex::BitRoutine)
-    @gensym st locs ctrl T nqubits step_1 step_2 it_i it_j temp ctrl_mask flag_mask
-    function kernel(i)
-        values = [:($st[$i+1]), :($st[$i + $step_1 + 1])]
-        entries = Expr(:block)
-        assigns = Expr(:block)
+function mm_kernel(st, x::BitRoutine, indices::Vector)
+    @gensym temp
+    entries = Expr(:block)
+    assigns = Expr(:block)
+    values = [:($st[$idx]) for idx in indices]
 
-        for p in 1:size(ex.expr, 1)
-            a = sym_mul(ex.expr[p, 1], values[1])
-            b = sym_mul(ex.expr[p, 2], values[2])
-            t = Symbol(temp, p)
-            e = sym_plus(a, b)
-            e == values[p] && continue
-            push!(entries.args, Expr(:(=), t, e))
-            push!(assigns.args, Expr(:(=), values[p], t))
+    for i in 1:size(x.expr, 1)
+        t = Symbol(temp, :_, i)
+        e = sym_mul(x.expr[i, 1], values[1])
+        for j in 2:size(x.expr, 2)
+            e = sym_plus(e, sym_mul(x.expr[i, j], values[j]))
         end
-
-        return quote
-            $entries
-            $assigns
-        end
+        e == values[i] && continue
+        push!(entries.args, Expr(:(=), t, e))
+        push!(assigns.args, Expr(:(=), values[i], t))
     end
 
-    function loop_kernel(f, n, j)
-        ret = Expr(:block, f(j))
-        for k in 1:n-1
-            push!(ret.args, f(:($j+$k)))
-        end
-        return ret
-    end
+    return Expr(:block, entries.args..., assigns.args...)
+end
 
-    function jloop(ex)
-        :(for $it_j in 0:$step_2:size($st, 1)-$step_1
-            $ex
+function nexprs(f, n::Int)
+    ex = Expr(:block)
+    for k in 1:n
+        push!(ex.args, f(k))
+    end
+    return ex
+end
+
+function broutine2x2_jloop(f, st, step_2, step_1)
+    @gensym j
+    quote
+        for $j in 0:$step_2:size($st, 1) - $step_1
+            $(f(j))
+        end
+    end
+end
+
+function broutine2x2_iloop(f, n, j, step_1)
+    @gensym i
+    quote
+        for $i in $j:$n:$j+$step_1-1
+            $(f(i))
+        end
+    end
+end
+
+function expand(f_kernel, max, st, step_1, step_2)
+    ret = Expr(:block)
+    for k in 0:max
+        n = 1 << k
+        expanded = broutine2x2_jloop(st, step_2, step_1) do j
+            nexprs(n) do i
+                f_kernel(:($j+$i))
+            end
+        end
+        push!(ret.args, quote
+            if $step_1 == $n
+                $expanded
+                return $st
+            end
         end)
     end
 
-    function expand(max, f)
-        root = Expr(:if, :($step_1 == 1), jloop(f(it_j)))
-        curr = root
-        for k in 1:max
-            n = 1 << k
-            elif = Expr(:elseif, :($step_1 == $n), jloop(loop_kernel(f, n, it_j)))
-            push!(curr.args, elif)
-            curr = elif
-        end
-        push!(curr.args, jloop(:(
-            for $it_i in $it_j:$(1<<max):$it_j+$step_1-1
-                $(loop_kernel(f, 1<<max, it_i))
+    push!(ret.args, broutine2x2_jloop(st, step_2, step_1) do j
+        broutine2x2_iloop(1<<max, j, step_1) do i
+            nexprs(1<<max) do k
+                f_kernel(:($i+$k))
             end
-        )))
-        return root
-    end
+        end
+    end)
+    return ret
+end
 
+function codegen_broutine2x2_generic(brt::BitRoutine)
+    @gensym st locs ctrl
     def = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVector{$T}), :(::Val{$(QuoteNode(ex.name))}), :($locs::$Locations{Int}), ex.args...],
-        :whereparams => [T, ex.typevars...],
+        :args => Any[:($st::AbstractVecOrMat), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), brt.args...],
         :body => quote
-            $step_1 = 1 << ($plain($locs) - 1)
-            $step_2 = 1 << ($plain($locs))
-
-            $(expand(4, kernel))
+            if length($locs) == 1
+                U11 = $(brt.expr[1, 1]); U12 = $(brt.expr[1, 2]);
+                U21 = $(brt.expr[2, 1]); U22 = $(brt.expr[2, 2]);
+                $_broutine2x2!($st, (U11, U12, U21, U22), $locs)
+            else
+                $multi_broutine2x2!($st, $(Val(brt.name)), $locs)
+            end
             return $st
         end,
     )
-
-    function ctrl_kernel(i)
-        :(
-            if $ismatch($i, $ctrl_mask, $flag_mask)
-                $(kernel(i))
-            end
-        )
-    end
 
     ctrl_def = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVector{$T}), :(::Val{$(QuoteNode(ex.name))}), :($locs::$(Union{Locations{Int}, Locations{Tuple{Int}}})), :($ctrl::$CtrlLocations), ex.args...],
-        :whereparams => [T, ex.typevars...],
+        :args => Any[:($st::AbstractVecOrMat), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), :($ctrl::$CtrlLocations), brt.args...],
         :body => quote
-            raw = first($plain($locs))
-            raw_ctrl = $plain($ctrl)
-            $step_1 = 1 << (raw - 1)
-            $step_2 = 1 << raw
-            $ctrl_mask = bmask(raw_ctrl)
-            $flag_mask = 0
-            for i in 1:length($ctrl)
-                if $ctrl.flags[i]
-                    $flag_mask += one(Int) << (raw_ctrl[i] - 1)
-                end
+            if length($locs) == 1
+                U11 = $(brt.expr[1, 1]); U12 = $(brt.expr[1, 2]);
+                U21 = $(brt.expr[2, 1]); U22 = $(brt.expr[2, 2]);
+                $_broutine2x2!($st, (U11, U12, U21, U22), $locs)
+            else
+                $multi_broutine2x2!($st, $(Val(brt.name)), $locs, $ctrl)
             end
-
-            $(expand(4, ctrl_kernel))
             return $st
         end,
     )
+
+    isempty(brt.typevars) || (def[:whereparams] = [brt.typevars...])
+    isempty(brt.typevars) || (ctrl_def[:whereparams] = [brt.typevars...])
 
     return quote
         $(combinedef(def))
         $(combinedef(ctrl_def))
     end
 end
+
+function multi_broutine2x2! end
 
 # U_{a1,b1}U_{a2,b2} st[b1,b2, ...]
 # U_{a1,0}U_{a2,0} st[0,0, ...] +
@@ -279,25 +292,26 @@ end
 # U_{1,1}U_{0,0} st[1,0, ...]
 # a1,a2 = 1,1
 # U_{1,1}U_{1,1} st[1,1, ...]
-function codegen_broutine2x2_diag(m::Module, brt::BitRoutine)
+function diag_kernel(brt::BitRoutine, st, locs)
     U11 = brt.expr[1, 1]
     U22 = brt.expr[2, 2]
-    @gensym T st locs l mask alpha m
-    parepare = quote
+
+    @gensym l mask alpha
+    init = quote
         $l = length($locs)
         $mask = $bmask(Int, $plain($locs))
     end
 
-    function kernel(m, p)
-        if U11 == U22 # this does not need k
-            if U11 isa Number && isone(U11)
-                ex = nothing
-            else
-                push!(parepare.args, :($alpha = $U11^l))
-                ex = :($st[$p] = $alpha * $st[$p])
-            end
+    if U11 == U22 # this does not need k
+        if U11 isa Number && isone(U11)
+            kernel = (m, p)->nothing
         else
-            ex = :($st[$p] = $U11^($l-k) * $U22^k * $st[$p])
+            push!(parepare.args, :($alpha = $U11^l))
+            kernel = (m, p)->:($st[$(p...)] = $alpha * $st[$(p...)])
+        end
+    else
+        kernel = (m, p)->begin
+            ex = :($st[$(p...)] = $U11^($l-k) * $U22^k * $st[$(p...)])
             ex = elim_double_const_pow(ex)
             ex = elim_const_pow(ex)
             ex = elim_identity(ex)
@@ -307,29 +321,71 @@ function codegen_broutine2x2_diag(m::Module, brt::BitRoutine)
                 $ex
             end
         end
-        return ex
     end
 
-    N = 8
-    expanded = Expr(:block, kernel(m, :($m+1)))
-    for i in 1:(N-1)
-        push!(expanded.args, kernel(:($m+$i), :($m+$(i+1))))
+    loop(m, p) = kernel(m, p)
+    loop(m, p, b) = kernel(m, (p, b))
+
+    return init, loop
+end
+
+function codegen_broutine2x2_diag(brt::BitRoutine)
+    @gensym st locs m b
+    
+    init, kernel = diag_kernel(brt, st, locs)
+    vexpanded = nexprs(8) do k
+        kernel(:($m+$k-1), :($m+$k))
     end
 
-    def = Dict{Symbol, Any}(
-        :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVector{$T}), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
-        :whereparams => [T, brt.typevars...],
+    vdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+        :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :body => quote
-            $parepare
-            @inbounds for $m in 0:length($st) - 1
-                $(kernel(m, :($m+1)))
+            $init
+            @inbounds if size($st, 1) > 8
+                for $m in 0:8:size($st, 1) - 1
+                    $expanded
+                end
+            else
+                for $m in 0:size($st, 1) - 1
+                    $(kernel(m, :($m+1)))
+                end
             end
             return $st
         end,
     )
 
-    return combinedef(def)
+    mexpanded = nexprs(8) do k
+        kernel(:($m+$k-1), :($m+$k), b)
+    end
+
+    mdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+        :args => Any[:($st::AbstractMatrix), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
+        :body => quote
+            $init
+            @inbounds if size($st, 1) > 8
+                for $b in 1:size($st, 2), $m in 0:8:size($st, 1) - 1
+                    $expanded
+                end
+            else
+                for $b in 1:size($st, 2), $m in 0:size($st, 1) - 1
+                    $(kernel(m, :($m+1), b))
+                end
+            end
+            return $st
+        end,
+    )
+
+    if !isempty(brt.typevars)
+        vdef[:whereparams] = [brt.typevars...]
+        mdef[:whereparams] = [brt.typevars...]
+    end
+
+    return quote
+        $(combinedef(vdef))
+        $(combinedef(mdef))
+    end
 end
 
 # U_{a1,b1}U_{a2,b2} st[b1,b2, ...]
@@ -346,129 +402,174 @@ end
 # U_{1,0}U_{0,1} st[0,1, ...]
 # a1,a2 = 1,1
 # U_{1,0}U_{1,0} st[0,0, ...]
-function codegen_broutine2x2_perm(m::Module, brt::BitRoutine)
+function perm_kernel(brt::BitRoutine, st, locs, m)
+    @gensym l mask do_mask alpha tmp i j isodd_l
     U12 = brt.expr[1, 2]
     U21 = brt.expr[2, 1]
-    @gensym T st locs l mask do_mask isodd_l alpha i j m
 
-    prepare = quote
+    init = quote
         $l = length($locs)
         $mask = bmask(Int, $plain($locs))
         $do_mask = bmask(Int, first($plain($locs)))
     end
 
-    if (U21 isa Number && U12 == -U21) || (U12 == :(-$U21))
-        push!(prepare.args, :($isodd_l = isodd($l)))
-        if !(U12 isa Number && isone(U12))
-            push!(prepare.args, :($alpha = $U12^$l))
-        end
-    end
-
-    kernel(p, q) = if U12 == U21
+    if U12 == U21
         if U12 isa Number && isone(U12)
-            quote
-                tmp = $st[$p]
-                $st[$p] = $st[$q]
-                $st[$q] = tmp
+            kernel = (p, q)->quote
+                $tmp = $st[$(q...)]
+                $st[$(q...)] = $st[$(p...)]
+                $st[$(p...)] = $tmp
             end
         else
-            push!(prepare.args, :($alpha = $U21^$l))
-            quote
-                tmp = $st[$p]
-                $st[$p] = $alpha * $st[$q]
-                $st[$q] = $alpha * tmp
+            push!(init.args, :($alpha = $U21^$l))
+            kernel = (p, q)->quote
+                $tmp = $st[$(q...)]
+                $st[$(q...)] = $alpha * $st[$(p...)]
+                $st[$(p...)] = $alpha * $tmp
             end
         end
     elseif (U21 isa Number && U12 == -U21) || (U12 == :(-$U21))
+        push!(init.args, :($isodd_l = isodd($l)))
+        if !(U12 isa Number && isone(U12))
+            push!(init.args, :($alpha = $U12^$l))
+        end
+
         if U12 isa Number && isone(U12)
-            quote
+            kernel = (p, q)->quote
                 k = count_ones($m & $mask)
-                tmp = $st[$p]
+                $tmp = $st[$(q...)]
                 if isodd(k)
-                    $st[$p] = -$st[$q]
+                    $st[$(q...)] = -$st[$(p...)]
                     if $isodd_l # (l-k) even
-                        $st[$q] = tmp
+                        $st[$(p...)] = $tmp
                     else
-                        $st[$q] = -tmp
+                        $st[$(p...)] = -$tmp
                     end
                 else
-                    $st[$p] = $st[$q]
+                    $st[$(q...)] = $st[$(p...)]
                     if $isodd_l # (l-k) old
-                        $st[$q] = -tmp
+                        $st[$(p...)] = -$tmp
                     else
-                        $st[$q] = tmp
+                        $st[$(p...)] = $tmp
                     end
                 end
             end
         else
-            quote
+            kernel = (p, q)->quote
                 k = count_ones($m & $mask)
-                tmp = $st[$p]
+                $tmp = $st[$(q...)]
                 if isodd(k)
-                    $st[$p] = -$alpha * $st[$q]
+                    $st[$(q...)] = -$alpha * $st[$(p...)]
                     if $isodd_l # (l-k) even
-                        $st[$q] = $alpha * tmp
+                        $st[$(p...)] = $alpha * $tmp
                     else
-                        $st[$q] = -$alpha * tmp
+                        $st[$(p...)] = -$alpha * $tmp
                     end
                 else
-                    $st[$p] = $alpha * $st[$q]
+                    $st[$(q...)] = $alpha * $st[$(p...)]
                     if $isodd_l # (l-k) old
-                        $st[$q] = -$alpha * tmp
+                        $st[$(p...)] = -$alpha * $tmp
                     else
-                        $st[$q] = $alpha * tmp
+                        $st[$(p...)] = $alpha * $tmp
                     end
                 end
             end
         end
     else
-        quote
+        kernel = (p, q)->quote
             k = count_ones($m & $mask)
-            tmp = $st[$p]
-            $st[$p] = $U21^k * $U12^($l-k) * $st[$q]
-            $st[$q] = $U12^k * $U21^($l-k) * tmp
+            $tmp = $st[$(q...)]
+            $st[$(q...)] = $U12^k * $U21^($l-k) * $st[$(p...)]
+            $st[$(p...)] = $U21^k * $U12^($l-k) * $tmp
         end
     end
 
-    function loop_kernel(m)
+    function loop(m)
         quote
             if $anyone($m, $do_mask)
                 $i = $m + 1
                 $j = ($m ⊻ $mask) + 1
-                $(kernel(i, j))
+                $(kernel((i, ), (j, )))
             end
         end
     end
 
-    N = 1
-    expanded_loop = Expr(:block, loop_kernel(m))
-    for i in 1:(N-1)
-        push!(expanded_loop.args, loop_kernel(:($m+$i)))
+    function loop(m, b)
+        quote
+            if $anyone($m, $do_mask)
+                $i = $m + 1
+                $j = ($m ⊻ $mask) + 1
+                $(kernel((i, b), (j, b)))
+            end
+        end
+    end
+    return init, loop
+end
+
+function codegen_broutine2x2_perm(brt::BitRoutine)
+    @gensym st locs m b
+    init, kernel = perm_kernel(brt, st, locs, m)
+    vexpanded = nexprs(8) do k
+        kernel(:($m + $k - 1))
     end
 
-    def = Dict{Symbol, Any}(
-        :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVector{$T}), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
-        :whereparams => [T, brt.typevars...],
+    vdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+        :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :body => quote
-            $prepare
-            @inbounds for $m in 0:$N:(length($st) - 1)
-                $(loop_kernel(m))
+            $init
+            @inbounds if size($st, 1) > 8
+                for $m in 0:8:(size($st, 1) - 1)
+                    $vexpanded
+                end
+            else
+                for $m in 0:(size($st, 1) - 1)
+                    $(kernel(m))
+                end
             end
             return $st
         end,
     )
 
-    return combinedef(def)
+    mexpanded = nexprs(8) do k
+        kernel(:($m + $k - 1), b)
+    end
+
+    mdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+        :args => Any[:($st::AbstractMatrix), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
+        :body => quote
+            $init
+            @inbounds if size($st, 1) > 8
+                for $b in 1:size($st, 2), $m in 0:8:(size($st, 1) - 1)
+                    $mexpanded
+                end
+            else
+                for $b in 1:size($st, 2), $m in 0:(size($st, 1) - 1)
+                    $(kernel(m, b))
+                end
+            end
+            return $st
+        end,
+    )
+
+    if !isempty(brt.typevars)
+        vdef[:whereparams] = [brt.typevars...]
+        mdef[:whereparams] = [brt.typevars...]
+    end
+    return quote
+        $(combinedef(vdef))
+        $(combinedef(mdef))
+    end
 end
 
-function codegen_broutine2x2_dense(m::Module, brt::BitRoutine)
+function codegen_broutine2x2_dense(brt::BitRoutine)
     U12 = brt.expr[1, 2]
     U21 = brt.expr[2, 1]
     @gensym T st loc locs gt
     def = Dict{Symbol, Any}(
-        :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVector{$T}), :($gt::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
+        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+        :args => Any[:($st::AbstractVecOrMat{$T}), :($gt::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :whereparams => [T, brt.typevars...],
         :body => quote
             for $loc in $locs
