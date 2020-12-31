@@ -171,7 +171,6 @@ function subspace_mul8x8!(st::AbstractVector{T}, comspace, U, subspace, offset=0
 
     @inbounds for k in subspace
         Base.Cartesian.@nextract 8 idx i-> k + indices_i + offset
-
         Base.Cartesian.@nexprs 8 i -> begin
             y_i = zero(T)
             Base.Cartesian.@nexprs 8 j -> begin

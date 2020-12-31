@@ -9,12 +9,21 @@ using LinearAlgebra
 using LoopVectorization
 using PaddedMatrices
 
+const BQCES_nthreads = Ref(1)
+
+function set_nthreads(n::Int)
+    BQCES_nthreads[] = n
+    return
+end
+
 macro _threads(ex)
-    if Threads.nthreads() > 1
-        esc(Expr(:macrocall, Expr(:(.), :Threads, QuoteNode(Symbol("@threads"))), __source__, ex))
-    else
-        esc(ex)
-    end
+    return quote
+        if (Threads.nthreads() > 1) && (length(st) > 4096)
+            $(Expr(:macrocall, Expr(:(.), :Threads, QuoteNode(Symbol("@threads"))), __source__, ex))
+        else
+            $ex
+        end
+    end |> esc
 end
 
 """

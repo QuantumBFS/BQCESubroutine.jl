@@ -221,13 +221,13 @@ def_broutine2x2_m = Dict{Symbol, Any}(
 
 def_broutine2x2_ctrl = Dict{Symbol, Any}(
     :name => :_broutine2x2!,
-    :args => [:(st::AbstractVector), :(U::AbstractMatrix), :(locs::Locations), :(ctrl::CtrlLocations)],
+    :args => [:(st::AbstractVector), :((U11,U12,U21,U22)), :(locs::Locations), :(ctrl::CtrlLocations)],
     :body => body_broutine2x2_ctrl,
 )
 
 def_broutine2x2_ctrl_m = Dict{Symbol, Any}(
     :name => :_broutine2x2!,
-    :args => [:(st::AbstractMatrix), :(U::AbstractMatrix), :(locs::Locations), :(ctrl::CtrlLocations)],
+    :args => [:(st::AbstractMatrix), :((U11,U12,U21,U22)), :(locs::Locations), :(ctrl::CtrlLocations)],
     :body => body_broutine2x2_ctrl_m,
 )
 
@@ -271,14 +271,14 @@ end
 # level 2 - special matrix routines
 
 # level 3 - intrinsic gate routines
-# @broutine X = [0 1;1 0]
-# @broutine Y = [0 -im;im 0]
-# @broutine Z = [1 0;0 -1]
-# @broutine H = [1/sqrt(2) 1/sqrt(2); 1/sqrt(2) -1/sqrt(2)]
-# @broutine T = [1 0;0 exp(im * π / 4)]
-# @broutine S = [1 0;0 im]
-# @broutine Sdag = [1 0;0 -im]
-# @broutine Tdag = [1 0;0 exp(-im * π / 4)]
-# @broutine Rx(θ::Real) = [cos(θ / 2) -im*sin(θ / 2); -im*sin(θ / 2) cos(θ / 2)]
-# @broutine Ry(θ::Real) = [cos(θ / 2) -sin(θ / 2); sin(θ / 2) cos(θ / 2)]
-# @broutine Rz(θ::Real) = [exp(-im * θ / 2) 0; 0 exp(im * θ / 2)]
+@broutine X = [0 1;1 0]
+@broutine Y = [0 -im;im 0]
+@broutine Z = [1 0;0 -1]
+@broutine H = [1/sqrt(2) 1/sqrt(2); 1/sqrt(2) -1/sqrt(2)]
+@broutine T = [1 0;0 exp(im * π / 4)]
+@broutine S = [1 0;0 im]
+@broutine Sdag = [1 0;0 -im]
+@broutine Tdag = [1 0;0 exp(-im * π / 4)]
+@broutine Rx(θ::Real) = [cos(θ / 2) -im*sin(θ / 2); -im*sin(θ / 2) cos(θ / 2)]
+@broutine Ry(θ::Real) = [cos(θ / 2) -sin(θ / 2); sin(θ / 2) cos(θ / 2)]
+@broutine Rz(θ::Real) = [exp(-im * θ / 2) 0; 0 exp(im * θ / 2)]
