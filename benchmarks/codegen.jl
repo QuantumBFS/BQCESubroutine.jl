@@ -3,7 +3,6 @@ using BQCESubroutine.Utilities
 using LinearAlgebra
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
 using Test
-using StaticArrays
 using BenchmarkTools
 using YaoArrayRegister
 using LoopVectorization

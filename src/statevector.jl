@@ -4,14 +4,30 @@ function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations)
     # NOTE: this is a very small overhead, and is very likely
     # to get optimized, we will always check these for the
     # sake of correctness.
-    @assert log2dim1(U) == length(locs)
-    n = log2dim1(st)
-    @assert n >= maximum(plain(locs))
+    @assert log2dim(U) == length(locs) "operator dimension mismatch locs"
+    n = log2dim(st)
+    @assert n >= maximum(plain(locs)) "locs is too large"
     subspace = bsubspace(n, locs)
     comspace = bcomspace(n, locs)
     subspace_mul!(st, comspace, U, subspace)
     return st
 end
+
+function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
+    size(U, 1) == 2 && return broutine2x2!(st, U, locs, ctrl)
+    @assert log2dim(U) == length(locs) "operator dimension mismatch locs"
+    n = log2dim(st)
+    @assert n >= maximum(plain(locs)) "locs is too large"
+    @assert isempty(intersect(locs, ctrl.storage)) "locs is overlapping with ctrl"
+    # NOTE: this only adds a small constant overhead anyway
+    # TODO: use StrideArray to optimize this away since its
+    # stack allocated.
+    subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
+    comspace = bcomspace(n, locs)
+    subspace_mul!(st, comspace, U, subspace, ctrl_offset(ctrl))
+    return st
+end
+
 
 function broutine2x2!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations)
     U11 = U[1, 1]; U12 = U[1, 2];
@@ -37,11 +53,11 @@ end
 
 function broutine2x2_m_kernel_expr(idx_1, idx_2)
     return quote
-        ST1 = U11 * st[$idx_1, b] + U12 * st[$idx_2, b]
-        ST2 = U21 * st[$idx_1, b] + U22 * st[$idx_2, b]
+        ST1 = U11 * st[b, $idx_1] + U12 * st[b, $idx_2]
+        ST2 = U21 * st[b, $idx_1] + U22 * st[b, $idx_2]
     
-        st[$idx_1, b] = ST1
-        st[$idx_2, b] = ST2
+        st[b, $idx_1] = ST1
+        st[b, $idx_2] = ST2
     end
 end
 
@@ -66,7 +82,7 @@ body_broutine2x2_m = quote
     step_2 = 1 << plain(locs)
 
     @inbounds if step_1 == 1
-        for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+        for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
             $(broutine2x2_m_kernel_expr(:(j+1), :(j+2)))
         end
         return st
@@ -97,7 +113,7 @@ end
 body_broutine2x2_ctrl_m = quote
     $init_broutine2x2_ctrl
     @inbounds if step_1 == 1
-        for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+        for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
             if ismatch(j, ctrl_mask, flag_mask)
                 $(broutine2x2_m_kernel_expr(:(j+1), :(j+2)))
             end
@@ -121,7 +137,7 @@ for k in [2,4,8,16]
 
     push!(body_broutine2x2_m.args, quote
         @inbounds if step_1 == $k
-            for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+            for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
                 Base.Cartesian.@nexprs $k i-> begin
                     $(broutine2x2_m_kernel_expr(:(j+i), :(j+i+step_1)))
                 end
@@ -145,7 +161,7 @@ for k in [2,4,8,16]
 
     push!(body_broutine2x2_ctrl_m.args, quote
         @inbounds if step_1 == $k
-            for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+            for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
                 Base.Cartesian.@nexprs $k i->begin
                     if ismatch(j+i-1, ctrl_mask, flag_mask)
                         $(broutine2x2_m_kernel_expr(:(j+i), :(j+i+step_1)))
@@ -170,7 +186,7 @@ push!(body_broutine2x2.args, quote
 end)
 
 push!(body_broutine2x2_m.args, quote
-    for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+    for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
         for i in j:16:j+step_1-1
             Base.Cartesian.@nexprs 16 k->begin
                 $(broutine2x2_m_kernel_expr(:(i+k), :(i+step_1+k)))
@@ -194,7 +210,7 @@ push!(body_broutine2x2_ctrl.args, quote
 end)
 
 push!(body_broutine2x2_ctrl_m.args, quote
-    for b in 1:size(st, 2), j in 0:step_2:size(st, 1)-step_1
+    for j in 0:step_2:size(st, 2)-step_1, b in 1:size(st, 1)
         for i in j:16:j+step_1-1
             Base.Cartesian.@nexprs 16 k->begin
                 if ismatch(i+k-1, ctrl_mask, flag_mask)
@@ -251,20 +267,6 @@ function broutine2x2!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, 
     U11 = U[1, 1]; U12 = U[1, 2];
     U21 = U[2, 1]; U22 = U[2, 2];
     _broutine2x2!(st, (U11,U12,U21,U22), locs, ctrl)
-    return st
-end
-
-function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
-    size(U, 1) == 2 && return broutine2x2!(st, U, locs, ctrl)
-    @assert log2dim1(U) == length(locs)
-    n = log2dim1(st)
-    @assert n >= maximum(plain(locs))
-    # NOTE: this only adds a small constant overhead anyway
-    # TODO: use StrideArray to optimize this away since its
-    # stack allocated.
-    subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
-    comspace = bcomspace(n, locs)
-    subspace_mul!(st, comspace, U, subspace, ctrl_offset(ctrl))
     return st
 end
 

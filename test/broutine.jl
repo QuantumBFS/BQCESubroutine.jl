@@ -1,36 +1,59 @@
+using Test
+using LinearAlgebra
 using BQCESubroutine
 using BQCESubroutine.Utilities
-using LinearAlgebra
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
-using Test
 using BQCESubroutine: ctrl_offset
-using YaoArrayRegister
-using Test
 
-function naive_broutine!(st, U, locs)
-    n = log2dim1(st)
+function naive_broutine!(st::AbstractVector, U, locs)
+    n = log2dim(st)
     subspace = bsubspace(n, locs)
     comspace = bcomspace(n, locs)
     indices = [idx + 1 for idx in comspace]
-    for b in 1:size(st, 2)
+    for k in subspace
+        idx = indices .+ k
+        st[idx] = U * st[idx]
+    end
+    return st
+end
+
+function naive_broutine!(st::AbstractMatrix, U, locs)
+    n = log2dim(st)
+    subspace = bsubspace(n, locs)
+    comspace = bcomspace(n, locs)
+    indices = [idx + 1 for idx in comspace]
+    for b in 1:size(st, 1)
         for k in subspace
             idx = indices .+ k
-            st[idx, b] = U * st[idx, b]
+            st[b, idx] = U * st[b, idx]
         end
     end
     return st
 end
 
-function naive_broutine!(st, U, locs, ctrl)
-    n = log2dim1(st)
+function naive_broutine!(st::AbstractVector, U, locs, ctrl)
+    n = log2dim(st)
     subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
     comspace = bcomspace(n, locs)
     offset = ctrl_offset(ctrl)
     indices = [idx + 1 for idx in comspace]
-    for b in 1:size(st, 2)
+    for k in subspace
+        idx = indices .+ k .+ offset
+        st[idx] = U * st[idx]
+    end
+    return st
+end
+
+function naive_broutine!(st::AbstractMatrix, U, locs, ctrl)
+    n = log2dim(st)
+    subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
+    comspace = bcomspace(n, locs)
+    offset = ctrl_offset(ctrl)
+    indices = [idx + 1 for idx in comspace]
+    for b in 1:size(st, 1)
         for k in subspace
             idx = indices .+ k .+ offset
-            st[idx, b] = U * st[idx, b]
+            st[b, idx] = U * st[b, idx]
         end
     end
     return st
@@ -46,7 +69,7 @@ end
 const N = 10
 
 @testset "generic broutine" begin
-    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), transpose(rand(ComplexF64, 5, 1 << N))]
+    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), rand(ComplexF64, 5, 1 << N)]
         @testset "$(1<<M)x$(1<<M)" for M in [1,2,3,4]
             U = rand(ComplexF64, 1<<M, 1<<M)
             @testset "i=$i" for i in 1:N
@@ -61,7 +84,7 @@ const N = 10
 end
 
 @testset "basic broutine $G" for G in [:X, :Y, :Z, :H, :T, :S, :Sdag, :Tdag]
-    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), transpose(rand(ComplexF64, 5, 1 << N))]
+    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), rand(ComplexF64, 5, 1 << N)]
         U = getfield(BQCESubroutine, Symbol(:B, G))
 
         @testset "$i=>$G" for i in 1:N

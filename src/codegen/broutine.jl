@@ -324,7 +324,7 @@ function diag_kernel(brt::BitRoutine, st, locs)
     end
 
     loop(m) = kernel(m, (:($m+1), ))
-    loop(m, b) = kernel(m, (:($m+1), b))
+    loop(m, b) = kernel(m, (b,:($m+1)))
 
     return init, loop
 end
@@ -338,7 +338,7 @@ function codegen_broutine2x2_diag(brt::BitRoutine)
         :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :body => quote
             $init
-            $(broutine2x2_loop_m(kernel, st, 8))
+            $(broutine2x2_loop(kernel, st, 8))
             return $st
         end,
     )
@@ -475,7 +475,7 @@ function perm_kernel(brt::BitRoutine, st, locs)
             if $anyone($m, $do_mask)
                 $i = $m + 1
                 $j = ($m ⊻ $mask) + 1
-                $(kernel(m, (i, b), (j, b)))
+                $(kernel(m, (b, i), (b, j)))
             end
         end
     end
@@ -515,11 +515,10 @@ function codegen_broutine2x2_perm(brt::BitRoutine)
     end
 end
 
-function broutine2x2_loop_expanded(f_kernel, st, N::Int, b=nothing)
+function broutine2x2_loop_expanded(f_kernel, st, N::Int)
     @gensym m _m Mmax mmax
-    kernel(x) = b === nothing ? f_kernel(x) : f_kernel(x, b)
     expanded = nexprs(N) do k
-        kernel(:($m + $k - 1))
+        f_kernel(:($m + $k - 1))
     end
 
     return quote
@@ -531,7 +530,31 @@ function broutine2x2_loop_expanded(f_kernel, st, N::Int, b=nothing)
                 $expanded
             else
                 for $_m in $m:$Mmax
-                    $(kernel(_m))
+                    $(f_kernel(_m))
+                end
+            end
+        end
+    end
+end
+
+function broutine2x2_loop_expanded(f_kernel, st, N::Int, b)
+    @gensym m _m Mmax mmax
+    expanded = nexprs(N) do k
+        f_kernel(:($m + $k - 1), b)
+    end
+
+    return quote
+        $Mmax = size($st, 2) - 1
+        for $_m in 0:($Mmax >>> $(log2i(N)))
+            $m = $_m << $(log2i(N))
+            $mmax = $m + $(N-1)
+            if $mmax ≤ $Mmax
+                for $b in 1:size($st, 1)
+                    $expanded
+                end
+            else
+                for $_m in $m:$Mmax, $b in 1:size($st, 1)
+                    $(f_kernel(_m, b))
                 end
             end
         end
@@ -554,12 +577,10 @@ end
 function broutine2x2_loop_m(f_kernel, st, N::Int)
     @gensym m b
     return quote
-        @inbounds if size($st, 1) > 8
-            for $b in 1:size($st, 2)
-                $(broutine2x2_loop_expanded(f_kernel, st, N, b))
-            end
+        @inbounds if size($st, 2) > 8
+            $(broutine2x2_loop_expanded(f_kernel, st, N, b))
         else
-            for $b in 1:size($st, 2), $m in 0:(size($st, 1) - 1)
+            for $m in 0:(size($st, 2) - 1)
                 $(f_kernel(m, b))
             end
         end

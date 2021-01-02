@@ -1,6 +1,6 @@
 module Utilities
 
-export log2i, log2dim1, group_shift, lmove, bsubspace, bcomspace, bmask, anyone, fast_expi_pi_pow, ismatch
+export log2i, log2dim, group_shift, lmove, bsubspace, bcomspace, bmask, anyone, fast_expi_pi_pow, ismatch
 
 using YaoLocations: plain, AbstractLocations
 
@@ -47,7 +47,8 @@ for N in [8, 16, 32, 64, 128]
     end
 end
 
-log2dim1(x::AbstractArray) = log2i(size(x, 1))
+log2dim(x::AbstractVector) = log2i(size(x, 1))
+log2dim(x::AbstractMatrix) = log2i(size(x, 2))
 
 @inline lmove(b::Int, mask::Int, k::Int)::Int = (b & ~mask) << k + (b & mask)
 

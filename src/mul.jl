@@ -54,42 +54,92 @@ function subspace_mul_generic!(st::AbstractVector{T}, indices, U, subspace, offs
     return st
 end
 
-function subspace_mul_generic!(st::AbstractMatrix, indices, U::AbstractMatrix{T}, subspace, offset=0) where T
+# NOTE: for other non-standard type, we should manually specialize a subspace routine
+#       similar to the complex number case.
+# TODO: specialize for HwReal
+function subspace_mul_generic!(st::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, offset=0) where T
     # TODO: this should be size(U, 1) x nthreads
     y = similar(st, (size(U, 1), ))
     idx = similar(indices)
-    @inbounds for k in subspace, b in 1:size(st, 2)
+
+    @inbounds for k in subspace
         for i in 1:size(U, 1)
             idx[i] = k + indices[i] + offset
         end
 
-        for i in 1:size(U, 1)
-            y[i] = zero(T)
-            for j in 1:size(U, 2)
-                y[i] += U[i, j] * st[idx[j], b]
+        for b in 1:size(st, 1)
+            for i in 1:size(U, 1)
+                y[i] = zero(T)
+                for j in 1:size(U, 2)
+                    y[i] += U[i, j] * st[b, idx[j]]
+                end
             end
-        end
 
-        for i in 1:size(U, 1)
-            st[idx[i], b] = y[i]
+            for i in 1:size(U, 1)
+                st[b, idx[i]] = y[i]
+            end
         end
     end
     return st
 end
 
-function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where T
-    C_re = StrideArray{T}(undef, (PaddedMatrices.static_length(indices), StaticInt{8}()))
-    C_im = StrideArray{T}(undef, (PaddedMatrices.static_length(indices), StaticInt{8}()))
-    U_re = StrideArray{T}(undef, (PaddedMatrices.size(U, StaticInt{1}()), PaddedMatrices.size(U, StaticInt{2}())))
-    U_im = StrideArray{T}(undef, (PaddedMatrices.size(U, StaticInt{1}()), PaddedMatrices.size(U, StaticInt{2}())))
+function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
+    D = PaddedMatrices.static_length(indices)
+    y_re = StrideArray{T}(undef, (D, ))
+    y_im = StrideArray{T}(undef, (D, ))
+    U_re = StrideArray{T}(undef, (D, D))
+    U_im = StrideArray{T}(undef, (D, D))
+    idx = StrideArray{eltype(indices)}(undef, (D, ))
     Ur = reinterpret(reshape, T, U)
 
     @inbounds @simd ivdep for i ∈ eachindex(U_re)
         U_re[i] = Ur[1,i]
         U_im[i] = Ur[2,i]
     end
+
     str = reinterpret(reshape, T, st)
-    Bmax = size(st,2)
+
+    @inbounds for k in subspace
+        for j in 1:size(U, 2)
+            idx[j] = indices[j] + k + offset
+        end
+
+        @avx for i in axes(U, 1)
+            y_re_i = zero(T)
+            y_im_i = zero(T)
+            for j in axes(U, 2)
+                idx_j = idx[j]
+                y_re_i += U_re[i, j] * str[1, idx_j] - U_im[i, j] * str[2, idx_j]
+                y_im_i += U_re[i, j] * str[2, idx_j] + U_im[i, j] * str[1, idx_j]
+            end
+            y_re[i] = y_re_i
+            y_im[i] = y_im_i
+        end
+
+        @avx for i in axes(U, 1)
+            idx_i = indices[i] + k + offset
+            str[1, idx_i] = y_re[i]
+            str[2, idx_i] = y_im[i]
+        end
+    end
+    return st
+end
+
+function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
+    D = PaddedMatrices.static_length(indices)
+    C_re = StrideArray{T}(undef, (D, StaticInt{8}()))
+    C_im = StrideArray{T}(undef, (D, StaticInt{8}()))
+    U_re = StrideArray{T}(undef, (D, D))
+    U_im = StrideArray{T}(undef, (D, D))
+    Ur = reinterpret(reshape, T, U)
+
+    @inbounds @simd ivdep for i ∈ eachindex(U_re)
+        U_re[i] = Ur[1,i]
+        U_im[i] = Ur[2,i]
+    end
+
+    str = reinterpret(reshape, T, st)
+    Bmax = size(st,1)
     for k in subspace
         # idx = k .+ indices
         # _k = k - 1
@@ -97,40 +147,40 @@ function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatri
             b =    _b << 3;
             bmax = b + 8
             if bmax ≤ Bmax # full static block
-                @avx for n ∈ 1:8, m ∈ axes(U, 1)
+                @avx for n ∈ 1:8, m ∈ axes(U_re, 1)
                     C_re_m_n = zero(T)
                     C_im_m_n = zero(T)
-                    for i ∈ axes(U, 2)
+                    for i ∈ axes(U_re, 2)
                         str_i = k + indices[i] + offset
-                        C_re_m_n += U_re[m,i] * str[1,str_i,n+b] - U_im[m,i] * str[2,str_i,n+b]
-                        C_im_m_n += U_re[m,i] * str[2,str_i,n+b] + U_im[m,i] * str[1,str_i,n+b]
+                        C_re_m_n += U_re[m,i] * str[1,n+b,str_i] - U_im[m,i] * str[2,n+b,str_i]
+                        C_im_m_n += U_re[m,i] * str[2,n+b,str_i] + U_im[m,i] * str[1,n+b,str_i]
                     end
                     C_re[m,n] = C_re_m_n
                     C_im[m,n] = C_im_m_n
                 end
-                @avx for n ∈ 1:8, m ∈ axes(U, 1)
+                @avx for n ∈ 1:8, m ∈ axes(U_re, 1)
                     str_m = k + indices[m] + offset
-                    str[1,str_m,n+b] = C_re[m,n]
-                    str[2,str_m,n+b] = C_im[m,n]
+                    str[1,n+b,str_m] = C_re[m,n]
+                    str[2,n+b,str_m] = C_im[m,n]
                 end
                 # AmulB!(C_re, C_im, U_re, U_im, 
             else # dynamic block
                 Nmax = 8 + Bmax - bmax
-                @avx for n ∈ 1:Nmax, m ∈ axes(U, 1)
+                @avx for n ∈ 1:Nmax, m ∈ axes(U_re, 1)
                     C_re_m_n = zero(T)
                     C_im_m_n = zero(T)
-                    for i ∈ axes(U, 2)
+                    for i ∈ axes(U_re, 2)
                         str_i = k + indices[i] + offset
-                        C_re_m_n += U_re[m,i] * str[1,str_i,n+b] - U_im[m,i] * str[2,str_i,n+b]
-                        C_im_m_n += U_re[m,i] * str[2,str_i,n+b] + U_im[m,i] * str[1,str_i,n+b]
+                        C_re_m_n += U_re[m,i] * str[1,n+b,str_i] - U_im[m,i] * str[2,n+b,str_i]
+                        C_im_m_n += U_re[m,i] * str[2,n+b,str_i] + U_im[m,i] * str[1,n+b,str_i]
                     end
                     C_re[m,n] = C_re_m_n
                     C_im[m,n] = C_im_m_n
                 end
-                @avx for n ∈ 1:Nmax, m ∈ axes(U, 1)
+                @avx for n ∈ 1:Nmax, m ∈ axes(U_re, 1)
                     str_m = k + indices[m] + offset
-                    str[1,str_m,n+b] = C_re[m,n]
-                    str[2,str_m,n+b] = C_im[m,n]
+                    str[1,n+b,str_m] = C_re[m,n]
+                    str[2,n+b,str_m] = C_im[m,n]
                 end
             end
         end
@@ -192,19 +242,19 @@ function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, su
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
     
-    @inbounds for k in subspace
+    for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
-        for b in 1:size(st, 2)
+        for b in 1:size(st, 1)
             Base.Cartesian.@nexprs 4 i -> begin
                 y_i = zero(T)
                 Base.Cartesian.@nexprs 4 j -> begin
-                    y_i += U_i_j * st[idx_j, b]
+                    y_i += U_i_j * st[b, idx_j]
                 end
             end
 
             Base.Cartesian.@nexprs 4 i -> begin
-                st[idx_i, b] = y_i
+                st[b, idx_i] = y_i
             end
         end
     end
