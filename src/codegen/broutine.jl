@@ -466,13 +466,22 @@ function multi_broutine2x2! end
 # a1,a2 = 1,1
 # U_{1,1}U_{1,1} st[1,1, ...]
 function diag_kernel(brt::BitRoutine, st, locs)
-    U11 = brt.expr[1, 1]
-    U22 = brt.expr[2, 2]
-
-    @gensym l mask alpha
+    @gensym l mask alpha U11 U22
     init = quote
         $l = length($locs)
         $mask = $bmask(Int, $plain($locs))
+    end
+
+    if brt.expr[1, 1] isa Number
+        U11 = brt.expr[1, 1]
+    else
+        push!(init.args, :($U11 = $(brt.expr[1, 1])))
+    end
+
+    if brt.expr[2, 2] isa Number
+        U22 = brt.expr[2, 2]
+    else
+        push!(init.args, :($U22 = $(brt.expr[2, 2])))
     end
 
     if U11 == U22 # this does not need k
@@ -505,6 +514,13 @@ end
 function codegen_broutine2x2_diag(brt::BitRoutine)
     @gensym st locs m b
     
+    # NOTE:
+    # no benefit if it's parameterized
+    # it will make our loop kernel too complicated
+    if !isempty(brt.args)
+        return codegen_broutine2x2_dense(brt)
+    end
+
     init, kernel = diag_kernel(brt, st, locs)
     vdef = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
@@ -552,13 +568,23 @@ end
 # a1,a2 = 1,1
 # U_{1,0}U_{1,0} st[0,0, ...]
 function perm_kernel(brt::BitRoutine, st, locs)
-    @gensym l mask alpha tmp i j isodd_l
-    U12 = brt.expr[1, 2]
-    U21 = brt.expr[2, 1]
+    @gensym l mask alpha tmp i j isodd_l U12 U21
 
     init = quote
         $l = length($locs)
         $mask = bmask(Int, $plain($locs))
+    end
+
+    if brt.expr[1, 2] isa Number
+        U12 = brt.expr[1, 2]
+    else
+        push!(init.args, :($U12 = $(brt.expr[1, 2])))
+    end
+
+    if brt.expr[2, 1] isa Number
+        U21 = brt.expr[2, 1]
+    else
+        push!(init.args, :($U21 = $(brt.expr[2, 1])))
     end
 
     if U12 == U21
@@ -755,7 +781,7 @@ function broutine2x2_loop(f_kernel, st, N::Int)
         return src
     else
         return return quote
-            @inbounds if size($st, 1) > 8
+            @fastmath @inbounds if size($st, 1) > 8
                 $(broutine2x2_loop_expanded(f_kernel, st, N))
             else
                 $src            
@@ -777,7 +803,7 @@ function broutine2x2_loop_m(f_kernel, st, N::Int)
         return src
     else
         return quote
-            @inbounds if size($st, 2) > 8
+            @fastmath @inbounds if size($st, 2) > 8
                 $(broutine2x2_loop_expanded(f_kernel, st, N, b))
             else
                 $src 
