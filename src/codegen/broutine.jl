@@ -77,28 +77,30 @@ function Base.show(io::IO, x::BitRoutine)
 end
 
 function broutine_m(m::Module, ex::Expr)
-    b = BitRoutine(ex)
+    brt = BitRoutine(ex)
 
-    broutines = if size(b) == 2
-        codegen_broutine2x2(m, b)
+    broutines = if size(brt) == 2
+        codegen_broutine2x2(brt)
+    elseif size(brt) == 4
+        codegen_broutine4x4_generic(brt)
     else
         error("size not supported yet")
     end
 
     # NOTE: we need to leave name space
     # for other type of qubits, e.g qutrits
-    const_name = Symbol(:B, b.name)
+    const_name = Symbol(:B, brt.name)
     body = Expr(:vcat)
-    for row in eachrow(b.expr)
+    for row in eachrow(brt.expr)
         push!(body.args, Expr(:row, row...))
     end
-    con = if isempty(b.args)
+    con = if isempty(brt.args)
         :(const $(const_name) = $body)
     else
         def = Dict{Symbol, Any}(
             :name => const_name,
-            :args => b.args,
-            :whereparams => b.typevars,
+            :args => brt.args,
+            :whereparams => brt.typevars,
             :body => body
         )
         combinedef(def)
@@ -110,9 +112,12 @@ function broutine_m(m::Module, ex::Expr)
     end
 end
 
+_iszero(x) = false
+_iszero(x::Number) = iszero(x)
+
 function sym_mul(a, b)
     if a isa Number
-        iszero(a) && return
+        iszero(a) && return 0
         isone(a) && return b
     end
 
@@ -120,11 +125,11 @@ function sym_mul(a, b)
 end
 
 function sym_plus(a, b)
-    if a === nothing && b === nothing
+    if _iszero(a) && _iszero(b)
         0
-    elseif a === nothing && b !== nothing
+    elseif _iszero(a) && !_iszero(b)
         b
-    elseif a !== nothing && b === nothing
+    elseif !_iszero(a) && _iszero(b)
         a
     else
         :($a + $b)
@@ -146,7 +151,7 @@ function isdiag(x::Matrix)
     return true
 end
 
-function codegen_broutine2x2(m::Module, x::BitRoutine)
+function codegen_broutine2x2(x::BitRoutine)
     ex = Expr(:block)
     push!(ex.args, codegen_broutine2x2_generic(x))
 
@@ -161,24 +166,41 @@ function codegen_broutine2x2(m::Module, x::BitRoutine)
     return ex
 end
 
-function mm_kernel(st, x::BitRoutine, indices::Vector)
-    @gensym temp
-    entries = Expr(:block)
-    assigns = Expr(:block)
-    values = [:($st[$idx]) for idx in indices]
+function subspace_mul_kernel(st, brt::BitRoutine)
+    @gensym temp U
+    init = Expr(:block)
 
-    for i in 1:size(x.expr, 1)
-        t = Symbol(temp, :_, i)
-        e = sym_mul(x.expr[i, 1], values[1])
-        for j in 2:size(x.expr, 2)
-            e = sym_plus(e, sym_mul(x.expr[i, j], values[j]))
+    for i in 1:size(brt.expr, 1), j in 1:size(brt.expr, 2)
+        if !(brt.expr[i, j] isa Number)
+            push!(init.args, :($(Symbol(U, i, j)) = $(brt.expr[i, j])))
         end
-        e == values[i] && continue
-        push!(entries.args, Expr(:(=), t, e))
-        push!(assigns.args, Expr(:(=), values[i], t))
     end
 
-    return Expr(:block, entries.args..., assigns.args...)
+    return init, function kernel(indices, b = nothing)
+        entries = Expr(:block)
+        assigns = Expr(:block)
+        if b === nothing
+            values = [:($st[$idx]) for idx in indices]
+        else
+            values = [:($st[$b, $idx]) for idx in indices]
+        end
+
+        for i in 1:size(brt.expr, 1)
+            t = Symbol(temp, :_, i)
+            Ui1 = brt.expr[i, 1] isa Number ? brt.expr[i, 1] : Symbol(U, i, 1)
+            e = sym_mul(Ui1, values[1])
+
+            for j in 2:size(brt.expr, 2)
+                Uij = brt.expr[i, j] isa Number ? brt.expr[i, j] : Symbol(U, i, j)
+                e = sym_plus(e, sym_mul(Uij, values[j]))
+            end
+
+            e == values[i] && continue
+            push!(entries.args, Expr(:(=), t, e))
+            push!(assigns.args, Expr(:(=), values[i], t))
+        end
+        return Expr(:block, entries.args..., assigns.args...)
+    end
 end
 
 function nexprs(f, n::Int)
@@ -192,7 +214,16 @@ end
 function broutine2x2_jloop(f, st, step_2, step_1)
     @gensym j
     quote
-        for $j in 0:$step_2:size($st, 1) - $step_1
+        @fastmath @inbounds for $j in 0:$step_2:size($st, 1) - $step_1
+            $(f(j))
+        end
+    end
+end
+
+function broutine2x2_jloop(f, st, step_2, step_1, b)
+    @gensym j
+    quote
+        @fastmath @inbounds for $j in 0:$step_2:size($st, 2) - $step_1, $b in 1:size($st, 1)
             $(f(j))
         end
     end
@@ -207,11 +238,11 @@ function broutine2x2_iloop(f, n, j, step_1)
     end
 end
 
-function expand(f_kernel, max, st, step_1, step_2)
+function expand(f_kernel, max, st, step_1, step_2, b...)
     ret = Expr(:block)
     for k in 0:max
         n = 1 << k
-        expanded = broutine2x2_jloop(st, step_2, step_1) do j
+        expanded = broutine2x2_jloop(st, step_2, step_1, b...) do j
             nexprs(n) do i
                 f_kernel(:($j+$i))
             end
@@ -224,7 +255,7 @@ function expand(f_kernel, max, st, step_1, step_2)
         end)
     end
 
-    push!(ret.args, broutine2x2_jloop(st, step_2, step_1) do j
+    push!(ret.args, broutine2x2_jloop(st, step_2, step_1, b...) do j
         broutine2x2_iloop(1<<max, j, step_1) do i
             nexprs(1<<max) do k
                 f_kernel(:($i+$k))
@@ -235,43 +266,185 @@ function expand(f_kernel, max, st, step_1, step_2)
 end
 
 function codegen_broutine2x2_generic(brt::BitRoutine)
-    @gensym st locs ctrl
-    def = Dict{Symbol, Any}(
+    @gensym st locs ctrl step_1 step_2 b raw raw_ctrl ctrl_mask flag_mask
+
+    init, kernel = subspace_mul_kernel(st, brt)
+
+    ret = Expr(:block)
+    for (T, _b) in [:AbstractVector=>(), :AbstractMatrix=>(b, )]
+        def_body = expand(4, st, step_1, step_2, _b...) do k
+            kernel([k, :($k + $step_1)], _b...)
+        end
+
+        def = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVecOrMat), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), brt.args...],
+        :args => Any[:($st::$T), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), brt.args...],
         :body => quote
-            if length($locs) == 1
-                U11 = $(brt.expr[1, 1]); U12 = $(brt.expr[1, 2]);
-                U21 = $(brt.expr[2, 1]); U22 = $(brt.expr[2, 2]);
-                $_broutine2x2!($st, (U11, U12, U21, U22), $locs)
-            else
-                $multi_broutine2x2!($st, $(Val(brt.name)), $locs)
+                if length($locs) == 1
+                    $init
+                    $step_1 = 1 << (first($plain($locs)) - 1)
+                    $step_2 = 1 << first($plain($locs))
+                    $def_body
+                else
+                    $multi_broutine2x2!($st, $(Val(brt.name)), $locs, $(brt.args...))
+                end
+                return $st
+            end,
+        )
+
+        ctrl_def_body = expand(4, st, step_1, step_2, _b...) do k
+            quote
+                if $ismatch($k-1, $ctrl_mask, $flag_mask)
+                    $(kernel([k, :($k + $step_1)], _b...))
+                end
+            end
+        end
+
+        ctrl_def = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :broutine!),
+        :args => Any[:($st::$T), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), :($ctrl::$CtrlLocations), brt.args...],
+        :body => quote
+                if length($locs) == 1
+                    $init
+                    $raw = first($plain($locs))
+                    $step_1 = 1 << ($raw - 1)
+                    $step_2 = 1 << $raw
+                    $raw_ctrl = $plain($ctrl)
+                    $ctrl_mask = bmask($raw_ctrl)
+                    $flag_mask = reduce(+, one(Int) << ($raw_ctrl[i] - 1) for i in 1:length($ctrl) if $ctrl.flags[i])
+                    $ctrl_def_body
+                else
+                    $multi_broutine2x2!($st, $(Val(brt.name)), $locs, $ctrl, $(brt.args...))
+                end
+                return $st
+            end,
+        )
+
+        isempty(brt.typevars) || (def[:whereparams] = [brt.typevars...])
+        isempty(brt.typevars) || (ctrl_def[:whereparams] = [brt.typevars...])
+
+        push!(ret.args, combinedef(def))
+        push!(ret.args, combinedef(ctrl_def))
+    end
+
+    return ret
+end
+
+function codegen_broutine4x4_generic(brt::BitRoutine)
+    @gensym st locs loc_1 loc_2 ctrl step_1 step_2 step_3 step_4 b b1 b2 b3 i1 i2 i3 i4
+    @gensym raw_ctrl ctrl_mask flag_mask
+
+    init, kernel = subspace_mul_kernel(st, brt)
+    indices = [i1,i2,i3,i4]
+    
+    vinit = quote
+        @assert length($locs) == 2 "number of locations mismatch"
+        $init
+        $loc_1 = first($plain($locs))
+        $loc_2 = last($plain($locs))
+
+        if $loc_1 > $loc_2
+            $loc_1 = last($plain($locs))
+            $loc_2 = first($plain($locs))
+        end
+
+        $step_1 = 1 << $loc_1
+        $step_2 = 1 << ($loc_1 - 1)
+        $step_3 = 1 << $loc_2
+        $step_4 = 1 << ($loc_2 - 1)
+    end
+
+    vdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :broutine!),
+        :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), brt.args...],
+        :body => quote
+            $vinit
+            @fastmath @inbounds for $b1 in 0:$step_3:size($st, 1)-$step_3
+                for $b2 in $b1:$step_1:$b1+$step_4-$step_1, $b3 in $b2:$b2+$step_2-1
+                    $i1 = $b3+1
+                    $i2 = $b3+$step_2+1
+                    $i3 = $b3+$step_4+1
+                    $i4 = $b3+$step_2+$step_4+1
+                    $(kernel(indices))
+                end
             end
             return $st
         end,
     )
 
-    ctrl_def = Dict{Symbol, Any}(
+    mdef = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :broutine!),
-        :args => Any[:($st::AbstractVecOrMat), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), :($ctrl::$CtrlLocations), brt.args...],
+        :args => Any[:($st::AbstractMatrix), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), brt.args...],
         :body => quote
-            if length($locs) == 1
-                U11 = $(brt.expr[1, 1]); U12 = $(brt.expr[1, 2]);
-                U21 = $(brt.expr[2, 1]); U22 = $(brt.expr[2, 2]);
-                $_broutine2x2!($st, (U11, U12, U21, U22), $locs, $ctrl)
-            else
-                $multi_broutine2x2!($st, $(Val(brt.name)), $locs, $ctrl)
+            $vinit
+            @fastmath @inbounds for $b1 in 0:$step_3:size($st, 2)-$step_3
+                for $b2 in $b1:$step_1:$b1+$step_4-$step_1, $b3 in $b2:$b2+$step_2-1, $b in axes($st, 1)
+                    $i1 = $b3+1
+                    $i2 = $b3+$step_2+1
+                    $i3 = $b3+$step_4+1
+                    $i4 = $b3+$step_2+$step_4+1
+                    $(kernel(indices, b))
+                end
             end
             return $st
         end,
     )
 
-    isempty(brt.typevars) || (def[:whereparams] = [brt.typevars...])
-    isempty(brt.typevars) || (ctrl_def[:whereparams] = [brt.typevars...])
+    ctrl_init = quote
+        $raw_ctrl = $plain($ctrl)
+        $ctrl_mask = bmask($raw_ctrl)
+        $flag_mask = reduce(+, one(Int) << ($raw_ctrl[i] - 1) for i in 1:length($ctrl) if $ctrl.flags[i])
+    end
+
+    ctrl_vdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :broutine!),
+        :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), :($ctrl::$CtrlLocations), brt.args...],
+        :body => quote
+            $vinit
+            $ctrl_init
+
+            @fastmath @inbounds for $b1 in 0:$step_3:size($st, 1)-$step_3
+                for $b2 in $b1:$step_1:$b1+$step_4-$step_1, $b3 in $b2:$b2+$step_2-1
+                    if $ismatch($b3, $ctrl_mask, $flag_mask)
+                        $i1 = $b3+1
+                        $i2 = $b3+$step_2+1
+                        $i3 = $b3+$step_4+1
+                        $i4 = $b3+$step_2+$step_4+1
+                        $(kernel(indices))
+                    end
+                end
+            end
+            return $st
+        end,
+    )
+
+    ctrl_mdef = Dict{Symbol, Any}(
+        :name => GlobalRef(BQCESubroutine, :broutine!),
+        :args => Any[:($st::AbstractMatrix), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations), :($ctrl::$CtrlLocations), brt.args...],
+        :body => quote
+            $vinit
+            $ctrl_init
+
+            @fastmath @inbounds for $b1 in 0:$step_3:size($st, 2)-$step_3
+                for $b2 in $b1:$step_1:$b1+$step_4-$step_1, $b3 in $b2:$b2+$step_2-1, $b in axes($st, 1)
+                    if $ismatch($b3, $ctrl_mask, $flag_mask)
+                        $i1 = $b3+1
+                        $i2 = $b3+$step_2+1
+                        $i3 = $b3+$step_4+1
+                        $i4 = $b3+$step_2+$step_4+1
+                        $(kernel(indices, b))
+                    end
+                end
+            end
+            return $st
+        end,
+    )
 
     return quote
-        $(combinedef(def))
-        $(combinedef(ctrl_def))
+        $(combinedef(vdef))
+        $(combinedef(mdef))
+        $(combinedef(ctrl_vdef))
+        $(combinedef(ctrl_mdef))
     end
 end
 
@@ -379,14 +552,13 @@ end
 # a1,a2 = 1,1
 # U_{1,0}U_{1,0} st[0,0, ...]
 function perm_kernel(brt::BitRoutine, st, locs)
-    @gensym l mask do_mask alpha tmp i j isodd_l
+    @gensym l mask alpha tmp i j isodd_l
     U12 = brt.expr[1, 2]
     U21 = brt.expr[2, 1]
 
     init = quote
         $l = length($locs)
         $mask = bmask(Int, $plain($locs))
-        $do_mask = bmask(Int, first($plain($locs)))
     end
 
     if U12 == U21
@@ -462,35 +634,42 @@ function perm_kernel(brt::BitRoutine, st, locs)
 
     function loop(m)
         quote
-            if $anyone($m, $do_mask)
-                $i = $m + 1
-                $j = ($m ⊻ $mask) + 1
-                $(kernel(m, (i, ), (j, )))
-            end
+            $i = $m + 1
+            $j = ($m ⊻ $mask) + 1
+            $(kernel(m, (i, ), (j, )))
         end
     end
 
     function loop(m, b)
         quote
-            if $anyone($m, $do_mask)
-                $i = $m + 1
-                $j = ($m ⊻ $mask) + 1
-                $(kernel(m, (b, i), (b, j)))
-            end
+            $i = $m + 1
+            $j = ($m ⊻ $mask) + 1
+            $(kernel(m, (b, i), (b, j)))
         end
     end
     return init, loop
 end
 
 function codegen_broutine2x2_perm(brt::BitRoutine)
-    @gensym st locs
+    @gensym st locs step_2 step_1 m b
     init, kernel = perm_kernel(brt, st, locs)
+
+    vdef_body = expand(4, st, step_1, step_2) do k
+        kernel(k)
+    end
+
+    mdef_body = expand(4, st, step_1, step_2, b) do k
+        kernel(k, b)
+    end
+
     vdef = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
         :args => Any[:($st::AbstractVector), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :body => quote
             $init
-            $(broutine2x2_loop(kernel, st, 8))
+            $step_2 = 1 << first($plain($locs))
+            $step_1 = 1 << (first($plain($locs)) - 1)
+            $vdef_body
             return $st
         end,
     )
@@ -500,7 +679,9 @@ function codegen_broutine2x2_perm(brt::BitRoutine)
         :args => Any[:($st::AbstractMatrix), :(::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
         :body => quote
             $init
-            $(broutine2x2_loop_m(kernel, st, 8))
+            $step_2 = 1 << first($plain($locs))
+            $step_1 = 1 << (first($plain($locs)) - 1)
+            $mdef_body
             return $st
         end,
     )
@@ -563,12 +744,21 @@ end
 
 function broutine2x2_loop(f_kernel, st, N::Int)
     @gensym m
-    return quote
-        @inbounds if size($st, 1) > 8
-            $(broutine2x2_loop_expanded(f_kernel, st, N))
-        else
-            for $m in 0:(size($st, 1) - 1)
-                $(f_kernel(m))
+
+    src = quote
+        @fastmath @inbounds for $m in 0:(size($st, 1) - 1)
+            $(f_kernel(m))
+        end
+    end
+
+    if N == 0
+        return src
+    else
+        return return quote
+            @inbounds if size($st, 1) > 8
+                $(broutine2x2_loop_expanded(f_kernel, st, N))
+            else
+                $src            
             end
         end
     end
@@ -576,13 +766,22 @@ end
 
 function broutine2x2_loop_m(f_kernel, st, N::Int)
     @gensym m b
-    return quote
-        @inbounds if size($st, 2) > 8
-            $(broutine2x2_loop_expanded(f_kernel, st, N, b))
-        else
-            for $m in 0:(size($st, 2) - 1)
-                $(f_kernel(m, b))
-            end
+
+    src = quote
+        @fastmath @inbounds for $m in 0:(size($st, 2) - 1)
+            $(f_kernel(m, b))
+        end
+    end
+
+    if N == 0
+        return src
+    else
+        return quote
+            @inbounds if size($st, 2) > 8
+                $(broutine2x2_loop_expanded(f_kernel, st, N, b))
+            else
+                $src 
+            end    
         end
     end
 end

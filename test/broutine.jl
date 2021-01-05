@@ -7,8 +7,8 @@ using BQCESubroutine: ctrl_offset
 
 function naive_broutine!(st::AbstractVector, U, locs)
     n = log2dim(st)
-    subspace = bsubspace(n, locs)
-    comspace = bcomspace(n, locs)
+    subspace = bsubspace(n, sort(locs))
+    comspace = bcomspace(n, sort(locs))
     indices = [idx + 1 for idx in comspace]
     for k in subspace
         idx = indices .+ k
@@ -19,8 +19,8 @@ end
 
 function naive_broutine!(st::AbstractMatrix, U, locs)
     n = log2dim(st)
-    subspace = bsubspace(n, locs)
-    comspace = bcomspace(n, locs)
+    subspace = bsubspace(n, sort(locs))
+    comspace = bcomspace(n, sort(locs))
     indices = [idx + 1 for idx in comspace]
     for b in 1:size(st, 1)
         for k in subspace
@@ -34,7 +34,7 @@ end
 function naive_broutine!(st::AbstractVector, U, locs, ctrl)
     n = log2dim(st)
     subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
-    comspace = bcomspace(n, locs)
+    comspace = bcomspace(n, sort(locs))
     offset = ctrl_offset(ctrl)
     indices = [idx + 1 for idx in comspace]
     for k in subspace
@@ -47,7 +47,7 @@ end
 function naive_broutine!(st::AbstractMatrix, U, locs, ctrl)
     n = log2dim(st)
     subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
-    comspace = bcomspace(n, locs)
+    comspace = bcomspace(n, sort(locs))
     offset = ctrl_offset(ctrl)
     indices = [idx + 1 for idx in comspace]
     for b in 1:size(st, 1)
@@ -101,6 +101,60 @@ end
             locs = Locations(i)
             ctrl = CtrlLocations(mod1(i+1, N))
             @test broutine!(copy(st), Val(G), locs, ctrl) ≈ naive_broutine!(copy(st), U, locs, ctrl)
+        end
+    end
+end
+
+@testset "parameterize gate $G" for G in [:Rx, :Ry, :Rz]
+    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), rand(ComplexF64, 5, 1 << N)]
+        U = getfield(BQCESubroutine, Symbol(:B, G))(0.2)
+
+        @testset "$i=>$G" for i in 1:N
+            locs = Locations(i)
+            @test broutine!(copy(st), Val(G), locs, 0.2) ≈ naive_broutine!(copy(st), U, locs)
+        end
+
+        @testset "($i, $(mod1(i+1, N)))=>$G" for i in 1:N
+            locs = sort(Locations((i, mod1(i+2, N))))
+            @test broutine!(copy(st), Val(G), locs, 0.2) ≈ naive_broutine_multi!(copy(st), U, locs)
+        end
+
+        @testset "@ctrl $(mod1(i+1, N)) $i=>$G" for i in 1:N
+            locs = Locations(i)
+            ctrl = CtrlLocations(mod1(i+1, N))
+            @test broutine!(copy(st), Val(G), locs, ctrl, 0.2) ≈ naive_broutine!(copy(st), U, locs, ctrl)
+        end
+    end
+end
+
+@testset "parameterize gate PSWAP" begin
+    U = BQCESubroutine.BPSWAP(0.2)
+    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), rand(ComplexF64, 5, 1 << N)]
+        @testset "$((i, mod1(i+1, N)))=>PSWAP" for i in 1:N
+            locs = Locations((i, mod1(i+1, N)))
+            @test broutine!(copy(st), Val(:PSWAP), locs, 0.2) ≈ naive_broutine!(copy(st), U, locs)
+        end
+
+        @testset "@ctrl $(mod1(i+1, N)) $i=>PSWAP" for i in 1:N
+            locs = sort(Locations((i, mod1(i+1, N))))
+            ctrl = CtrlLocations(mod1(i+2, N))
+            @test broutine!(copy(st), Val(:PSWAP), locs, ctrl, 0.2) ≈ naive_broutine!(copy(st), U, locs, ctrl)
+        end
+    end
+end
+
+@testset "gate SWAP" begin
+    U = BQCESubroutine.BSWAP
+    @testset "size(st)=$(size(st))" for st in [rand(ComplexF64, 1 << N), rand(ComplexF64, 5, 1 << N)]
+        @testset "$((i, mod1(i+1, N)))=>SWAP" for i in 1:N
+            locs = Locations((i, mod1(i+1, N)))
+            @test broutine!(copy(st), Val(:SWAP), locs) ≈ naive_broutine!(copy(st), U, locs)
+        end
+
+        @testset "@ctrl $(mod1(i+1, N)) $i=>SWAP" for i in 1:N
+            locs = sort(Locations((i, mod1(i+1, N))))
+            ctrl = CtrlLocations(mod1(i+2, N))
+            @test broutine!(copy(st), Val(:SWAP), locs, ctrl) ≈ naive_broutine!(copy(st), U, locs, ctrl)
         end
     end
 end
