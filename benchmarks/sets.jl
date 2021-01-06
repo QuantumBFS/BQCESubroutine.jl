@@ -22,9 +22,8 @@ function benchmarkset_m(title, ex::Expr)
     end
     exec = quote
         if length($stack) == 1
-            SUITE = pop!($stack)
+            pop!($stack)
         end
-        nothing
     end
     return if ex.head === :block
         quote
