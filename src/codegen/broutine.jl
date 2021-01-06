@@ -126,7 +126,7 @@ end
 function _generic_kernel(brt::BitRoutine, st, locs, step)
     @gensym M raw_locs
     init = quote
-        @assert length($locs) == $(2size(brt)) "number of locations mismatch operator size"
+        @assert length($locs) == $(log2i(size(brt))) "number of locations mismatch operator size"
         $raw_locs = $plain(sort($locs))
     end
 
@@ -201,9 +201,7 @@ function subspace_loop(f, brt::BitRoutine, st, step, b = nothing, max = 4)
     idx(i) = Symbol(m, :_, i)
 
     N = b === nothing ? :(size($st, 1)) : :(size($st, 2))
-    head = quote
-        $(idx(1)) = 0:$(step_h(n)):$N-$(step_h(n))
-    end
+    head = Expr(:block, :($(idx(1)) = 0:$(step_h(n)):$N-$(step_h(n))))
 
     # b2 in b1:step_1_h:b1+step_2_l-step_1_h
     for i in 2:n
@@ -219,6 +217,7 @@ function subspace_loop(f, brt::BitRoutine, st, step, b = nothing, max = 4)
             ex = nexprs(1 << p) do k
                 f(:($(idx(n)) + $(k - 1)), b)
             end
+
             push!(ret.args, quote
                 if $(step_l(1)) == $(1 << p)
                     $(Expr(:for, head, ex))
@@ -255,41 +254,41 @@ function generic_ctrl_kernel(f_kernel, ctrl)
     end
 end
 
-# function broutine_m(m::Module, ex::Expr)
-#     brt = BitRoutine(ex)
+function broutine_m(m::Module, ex::Expr)
+    brt = BitRoutine(ex)
 
-#     broutines = if size(brt) == 2
-#         codegen_broutine2x2(brt)
-#     elseif size(brt) == 4
-#         codegen_broutine4x4_generic(brt)
-#     else
-#         error("size not supported yet")
-#     end
+    # # generate multi-gate routine
+    # broutines = if size(brt) == 2
+    #     codegen_broutine2x2(brt)
+    # else
+    #     nothing
+    # end
 
-#     # NOTE: we need to leave name space
-#     # for other type of qubits, e.g qutrits
-#     const_name = Symbol(:B, brt.name)
-#     body = Expr(:vcat)
-#     for row in eachrow(brt.expr)
-#         push!(body.args, Expr(:row, row...))
-#     end
-#     con = if isempty(brt.args)
-#         :(const $(const_name) = $body)
-#     else
-#         def = Dict{Symbol, Any}(
-#             :name => const_name,
-#             :args => brt.args,
-#             :whereparams => brt.typevars,
-#             :body => body
-#         )
-#         combinedef(def)
-#     end
+    # NOTE: we need to leave name space
+    # for other type of qubits, e.g qutrits
+    const_name = Symbol(:B, brt.name)
+    body = Expr(:vcat)
+    for row in eachrow(brt.expr)
+        push!(body.args, Expr(:row, row...))
+    end
+    con = if isempty(brt.args)
+        :(const $(const_name) = $body)
+    else
+        def = Dict{Symbol, Any}(
+            :name => const_name,
+            :args => brt.args,
+            :whereparams => brt.typevars,
+            :body => body
+        )
+        combinedef(def)
+    end
 
-#     return quote
-#         $broutines
-#         $con
-#     end
-# end
+    return quote
+        $(codegen_broutine(brt))
+        # $broutines
+        $con
+    end
+end
 
 # function isperm(x::Matrix)
 #     all(count(x->!isa(x, Number) || !iszero(x), col) == 1 for col in eachcol(x))
