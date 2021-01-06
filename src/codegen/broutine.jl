@@ -101,7 +101,7 @@ function codegen_broutine(brt::BitRoutine)
             init, kernel = generic_kernel(brt, st, locs, ctrl, step)
             quote
                 $init
-                $(subspace_loop(kernel, brt, st, step, batch))
+                @fastmath @inbounds $(subspace_loop(kernel, brt, st, step, batch))
             end
         end
         push!(ret.args, mt)
