@@ -27,7 +27,7 @@ macro _threads(ex)
 end
 
 """
-    broutine!(st, op, locs[, ctrl, theta])
+    broutine!(st, op, locs[, ctrl, args...])
 
 Qubit-based quantum circuit subroutine.
 
@@ -37,7 +37,7 @@ Qubit-based quantum circuit subroutine.
 - `op`: the operator
 - `locs`: a `Locations`, location of the operator
 - `ctrl`: optional. A `CtrlLocations`, location of the control qubits.
-- `theta`: optional. A `Number`, parameters of the operator.
+- `args`: optional. parameters of the operator.
 """
 function broutine! end
 
