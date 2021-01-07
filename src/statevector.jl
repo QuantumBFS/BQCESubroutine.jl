@@ -266,7 +266,9 @@ end
 function broutine2x2!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
     U11 = U[1, 1]; U12 = U[1, 2];
     U21 = U[2, 1]; U22 = U[2, 2];
-    _broutine2x2!(st, (U11,U12,U21,U22), locs, ctrl)
+    for loc in locs
+        _broutine2x2!(st, (U11,U12,U21,U22), locs, ctrl)
+    end
     return st
 end
 
