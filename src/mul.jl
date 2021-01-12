@@ -195,7 +195,7 @@ function subspace_mul4x4!(st::AbstractVector{T}, comspace, U, subspace, offset=0
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
 
-    for k in subspace
+    @inbounds for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
         Base.Cartesian.@nexprs 4 i -> begin
@@ -242,7 +242,7 @@ function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, su
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
     
-    for k in subspace
+    @inbounds for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
         for b in 1:size(st, 1)

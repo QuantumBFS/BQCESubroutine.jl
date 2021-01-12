@@ -3,28 +3,12 @@ module BQCESubroutine
 export broutine!, @broutine
 
 using MatchCore
+using MLStyle
 using ExprTools
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, AbstractLocations, merge_locations
 using LinearAlgebra
 using LoopVectorization
 using PaddedMatrices
-
-const BQCES_nthreads = Ref(1)
-
-function set_nthreads(n::Int)
-    BQCES_nthreads[] = n
-    return
-end
-
-macro _threads(ex)
-    return quote
-        if (Threads.nthreads() > 1) && (length(st) > 4096)
-            $(Expr(:macrocall, Expr(:(.), :Threads, QuoteNode(Symbol("@threads"))), __source__, ex))
-        else
-            $ex
-        end
-    end |> esc
-end
 
 """
     broutine!(st, op, locs[, ctrl, args...])
@@ -42,6 +26,7 @@ Qubit-based quantum circuit subroutine.
 function broutine! end
 
 include("utils.jl")
+# include("threading.jl")
 
 using .Utilities
 

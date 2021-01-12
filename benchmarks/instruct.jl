@@ -121,8 +121,8 @@ INST["param"] = @benchmarkset "$N-bits" for N in 5:5:20
     end
 end
 
-tune!(SUITE;verbose=true)
-BenchmarkTools.save("params.json", params(SUITE));
+# tune!(SUITE;verbose=true)
+# BenchmarkTools.save("params.json", params(SUITE));
 
 results = map([SUITE, INST]) do SET
     loadparams!(SET, BenchmarkTools.load("params.json")[1], :evals, :samples)
@@ -147,7 +147,7 @@ xaxis = []
 speedups = Float64[]
 for k1 in keys(d), k2 in keys(d[k1]), k3 in keys(d[k1][k2]), k4 in keys(d[k1][k2][k3]), k5 in keys(d[k1][k2][k3][k4])
     r = d[k1][k2][k3][k4][k5]
-    if r > 1
+    if r < 1
         @info "$k1-$k2-$k3-$k4-$k5"
         push!(speedups, r)
         push!(xaxis, "$k1-$k2-$k3-$k4-$k5")

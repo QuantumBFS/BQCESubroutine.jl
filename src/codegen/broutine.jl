@@ -4,19 +4,24 @@ end
 
 struct BitRoutine
     name::Symbol
+    sz::Int
+    isperm::Bool
+    isdiag::Bool
     args::Vector{Any}
-    expr::Matrix{Any}
+    expr::Hoistable
     typevars::Vector{Any}
 end
 
-function BitRoutine(ex::Expr)
+function BitRoutine(m::Module, ex::Expr)
     def = splitdef(ex; throw=false)
     if def === nothing
         ex.head === :(=) || error("invalid syntax, expect function or matrix, got: $ex")
         name, mat = ex.args
         name isa Symbol || error("invalid syntax, matrix name must be a Symbol, got: $name")
         mat.head === :vcat || error("invalid syntax, expect matrix, got: $mat")
-        return BitRoutine(name, [], match_matrix_expr(mat), [])
+        M = match_matrix_expr(m, mat)
+        sz = LinearAlgebra.checksquare(M)
+        return BitRoutine(name, sz, isperm(M), isdiag(M), [], Hoistable(M), [])
     else
         haskey(def, :name) || error("routine definition cannot be annoymous")
         haskey(def, :args) || error("do not declare constant gate as function")
@@ -27,69 +32,130 @@ function BitRoutine(ex::Expr)
         if body.head === :block
             body = last(body.args)
         end
-        return BitRoutine(def[:name], def[:args],
-            match_matrix_expr(body), get(def, :whereparams, []))
+        M = match_matrix_expr(m, body)
+        sz = LinearAlgebra.checksquare(M)
+        return BitRoutine(def[:name], sz, isperm(M), isdiag(M), def[:args],
+            Hoistable(M), get(def, :whereparams, []))
     end
 end
 
-function match_matrix_expr(ex::Expr)
+function match_matrix_expr(m::Module, ex::Expr)
     ex.head === :vcat || error("not a matrix expression")
     size = length(ex.args)
     expr = Matrix{Any}(undef, size, size)
     for (i, row) in enumerate(ex.args)
         row.head === :row || error("not a matrix expression")
         for (j, each) in enumerate(row.args)
-            expr[i, j] = each
+            expr[i, j] = eval_interp(m, each)
         end
     end
     return expr
 end
 
-Base.size(x::BitRoutine) = size(x.expr, 1)
+function should_hoist(ex)
+    @match ex begin
+        ::Symbol ||
+        :(-$(::Symbol)) ||
+        ::Number => false
+        _ => true
+    end
+end
 
-function Base.show(io::IO, x::BitRoutine)
-    print(io, x.name)
-    if isempty(x.args)
+function should_hoist_pow(ex)
+    @match ex begin
+        ::Symbol ||
+        :(-$(::Symbol)) ||
+        :(exp(im * π / $k)) ||
+        :(exp(π * im / $k)) ||
+        ::Number => false
+        _ => true
+    end
+end
+
+function hoist_entries!(brt::BitRoutine)
+    for i in 1:size(brt), j in 1:size(brt)
+        if should_hoist_pow(brt.expr.origin[(i, j)])
+            hoist!(brt.expr, i, j)
+        end
+    end
+end
+
+Base.size(brt::BitRoutine) = brt.sz
+
+function Base.show(io::IO, brt::BitRoutine)
+    print(io, brt.name)
+    if isempty(brt.args)
         print(io, " = ")
     else
-        print(io, "(", join(x.args, ", "), ") ")
-        if !isempty(x.typevars)
-            print(io, "where {", join(x.typevars, ", "), "} ")
+        print(io, "(", join(brt.args, ", "), ") ")
+        if !isempty(brt.typevars)
+            print(io, "where {", join(brt.typevars, ", "), "} ")
         end
         print(io, "= ")
     end
 
     print(io, "[")
-    for i in 1:size(x.expr, 1)
-        for j in 1:size(x.expr, 2)
-            print(io, x.expr[i, j])
-            if j != size(x.expr, 2)
+    for i in 1:size(brt)
+        for j in 1:size(brt)
+            print(io, brt.expr[i, j])
+            if j != size(brt)
                 print(io, " ")
-            elseif i != size(x.expr, 1)
+            elseif i != size(brt)
                 print(io, ";")
             end
         end
 
-        if i != size(x.expr, 1)
+        if i != size(brt)
             print(io, " ")
         end
     end
     print(io, "]")
 end
 
-function codegen_method(f_body, brt::BitRoutine, name::Symbol, batch, ctrl)
-    @gensym st locs
-    T = batch === nothing ? AbstractVector : AbstractMatrix
-    args = Any[:($st::$T), :(::Val{$(QuoteNode(brt.name))}), :($locs::$Locations)]
-    ctrl === nothing || push!(args, :($ctrl::$CtrlLocations))
-    append!(args, brt.args)
+mutable struct BitContext
+    hoisted_vars::VarDefs
+    kernel_vars::VarDefs
 
+    st::Symbol
+    locs::Symbol
+    ctrl
+
+    # options
+    batch::Bool
+    # compile params
+    # expand the loop with stride 1 << expand_sz
+    expand_sz::Int
+end
+
+BitContext(;ctrl=nothing, batch=false) =
+    BitContext(VarDefs(), VarDefs(), gensym(:st), gensym(:locs), ctrl, batch, 3)
+
+step_l(i::Int) = Symbol(:step, :_, i, :_l)
+step_h(i::Int) = Symbol(:step, :_, i, :_h)
+step_l(ctx::BitContext, i::Int) = getproperty(ctx.hoisted_vars, step_l(i))
+step_h(ctx::BitContext, i::Int) = getproperty(ctx.hoisted_vars, step_h(i))
+space_length(ctx::BitContext) = ctx.batch ? :(size($(ctx.st), 2)) : :(size($(ctx.st), 1))
+refst(ctx::BitContext, i, b = nothing) = b === nothing ? :($(ctx.st)[$i]) : :($(ctx.st)[$b, $i])
+
+function def_strides!(ctx::BitContext, brt::BitRoutine)
+    for i in 1:log2i(size(brt))
+        def!(ctx.hoisted_vars, step_l(i), :(1 << ($plain($(ctx.locs))[$i] - 1)) )
+        def!(ctx.hoisted_vars, step_h(i), :(1 << $plain($(ctx.locs))[$i]) )
+    end
+    return ctx
+end
+
+function codegen_method(f_body, ctx::BitContext, brt::BitRoutine, name::Symbol)
+    T = ctx.batch ? AbstractMatrix : AbstractVector
+    args = Any[:($(ctx.st)::$T), :(::Val{$(QuoteNode(brt.name))}), :($(ctx.locs)::$Locations)]
+    ctx.ctrl === nothing || push!(args, :($(ctx.ctrl)::$CtrlLocations))
+    append!(args, brt.args)
     def = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, name),
         :args => args,
         :body => quote
-            $(f_body(st, locs))
-            return $st
+            $(f_body())
+            return $(ctx.st)
         end,
     )
     isempty(brt.typevars) || (def[:whereparams] = [brt.typevars...])
@@ -97,23 +163,21 @@ function codegen_method(f_body, brt::BitRoutine, name::Symbol, batch, ctrl)
 end
 
 function broutine_m(m::Module, ex::Expr)
-    brt = BitRoutine(ex)
-
-    # generate multi-gate routine for 2x2
-    broutines = if size(brt) == 2
-        codegen_broutine2x2_multi(brt)
-    else
-        nothing
-    end
-
+    brt = BitRoutine(m, ex)
+    hoist_entries!(brt)
     # NOTE: we need to leave name space
     # for other type of qubits, e.g qutrits
     const_name = Symbol(:B, brt.name)
     body = Expr(:vcat)
-    for row in eachrow(brt.expr)
-        push!(body.args, Expr(:row, row...))
+    for i in 1:size(brt)
+        row = Expr(:row)
+        for j in 1:size(brt)
+            push!(row.args, brt.expr.origin[(i, j)])
+        end
+        push!(body.args, row)
     end
-    con = if isempty(brt.args)
+
+    binding = if isempty(brt.args)
         :(const $(const_name) = $body)
     else
         def = Dict{Symbol, Any}(
@@ -125,483 +189,413 @@ function broutine_m(m::Module, ex::Expr)
         combinedef(def)
     end
 
-    return quote
-        $(codegen_broutine(brt))
-        $broutines
-        $con
+    ret = Expr(:block)
+    for batch in [false, true], ctrl in [nothing, gensym(:ctrl)]
+        push!(ret.args, codegen_broutine(BitContext(;ctrl, batch), brt))
+        # generate multi-gate routine for 2x2
+        if size(brt) == 2
+            ctx = BitContext(;ctrl, batch)
+            push!(ret.args, codegen_broutine2x2_multi(ctx, brt))
+        end
+    end
+    push!(ret.args, binding)
+    return ret
+end
+
+function codegen_broutine(ctx::BitContext, brt::BitRoutine)
+    return codegen_method(ctx, brt, :broutine!) do
+        body = Expr(:block)
+        push!(body.args, sort_locations(ctx, log2i(size(brt))))
+        # NOTE: multi-gate only supports non-ctrl routine
+        if ctx.ctrl === nothing
+            multi = Expr(:call, GlobalRef(BQCESubroutine, :multi_broutine2x2!),
+                ctx.st, Val(brt.name), ctx.locs)
+            append!(multi.args, brt.args)
+            size(brt) == 2 && push!(body.args, :(length($(ctx.locs)) == 1 || return $multi))
+        end
+        push!(body.args, :(@assert length($(ctx.locs)) == $(log2i(size(brt))) "number of locations mismatch operator size"))
+        push!(body.args, loop(ctx, brt))
+        return body
     end
 end
 
-function codegen_broutine2x2_multi(brt::BitRoutine)
+function codegen_broutine2x2_multi(ctx::BitContext, brt::BitRoutine)
     # NOTE:
     # no benefit if it's parameterized
     # it will make our loop kernel too complicated
-    if !isempty(brt.args)
-        return codegen_broutine2x2_dense(brt)
-    end
-
-    if isdiag(brt.expr)
-        return codegen_broutine2x2_diag(brt)
-    elseif isperm(brt.expr)
-        return codegen_broutine2x2_perm(brt)
-    else
-        return codegen_broutine2x2_dense(brt)
-    end
-end
-
-function codegen_broutine(brt::BitRoutine)
-    @gensym step
-    ret = Expr(:block)
-    for batch in [nothing, gensym(:batch)], ctrl in [nothing, gensym(:ctrl)]
-        mt = codegen_method(brt, :broutine!, batch, ctrl) do st, locs
-            init, kernel = generic_kernel(brt, st, locs, ctrl, step)
-            multi = Expr(:call, GlobalRef(BQCESubroutine, :multi_broutine2x2!),
-                st, :(Val($(QuoteNode(brt.name)))), locs)
-            ctrl === nothing || push!(multi.args, ctrl)
-            append!(multi.args, brt.args)
-
-            body = Expr(:block)
-            size(brt) == 2 && push!(body.args, :(length($locs) == 1 || return $multi))
-            push!(body.args, init)
-            push!(body.args, :(@fastmath @inbounds $(subspace_loop(kernel, brt, st, step, batch))) )
-            return body
-        end
-        push!(ret.args, mt)
-    end
-    return ret
-end
-
-function codegen_broutine2x2_diag(brt::BitRoutine)
-    @gensym batch
-
-    ret = Expr(:block)
-    for b in [nothing, batch]
-        mt = codegen_method(brt, :multi_broutine2x2!, b, nothing) do st, locs
-            init, kernel = diag_kernel(brt, st, locs)
+    if !isempty(brt.args) || (!brt.isdiag && !brt.isperm)
+        @gensym loc
+        return codegen_method(ctx, brt, :multi_broutine2x2!) do
             quote
-                $init
-                $(broutine2x2_loop(kernel, st, 1, b))
-            end
-        end
-        push!(ret.args, mt)
-    end
-    return ret
-end
-
-function codegen_broutine2x2_perm(brt::BitRoutine)
-    @gensym step
-    
-    ret = Expr(:block)
-    for batch in [nothing, gensym(:batch)]
-        mt = codegen_method(brt, :multi_broutine2x2!, batch, nothing) do st, locs
-            init, kernel = perm_kernel(brt, st, locs)
-            quote
-                $init
-                $(Symbol(step, :_, 1, :_l)) = 1 << (first($plain($locs)) - 1)
-                $(Symbol(step, :_, 1, :_h)) = 1 << first($plain($locs))
-                @fastmath @inbounds $(subspace_loop(kernel, brt, st, step, batch))
-            end
-        end
-        push!(ret.args, mt)
-    end
-
-    return ret
-end
-
-function generic_kernel(brt::BitRoutine, st, locs, ctrl, step)
-    init, kernel = _generic_kernel(brt, st, locs, step)
-    if ctrl === nothing
-        return init, kernel
-    else
-        ctrl_init, ctrl_kernel = generic_ctrl_kernel(kernel, ctrl)
-        init = quote
-            $init
-            $ctrl_init
-        end
-        return init, ctrl_kernel
-    end
-end
-
-ishoisted(x) = !(x isa Number || x isa Symbol || x == :(-im))
-
-function _generic_kernel(brt::BitRoutine, st, locs, step)
-    @gensym M raw_locs
-    init = quote
-        @assert length($locs) == $(log2i(size(brt))) "number of locations mismatch operator size"
-        $raw_locs = $plain(sort($locs))
-    end
-
-    step_l(i) = Symbol(step, :_, i, :_l)
-    step_h(i) = Symbol(step, :_, i, :_h)
-    U(i, j) = ishoisted(brt.expr[i, j]) ? Symbol(M, :_, i, j) : brt.expr[i, j]
-
-    for i in 1:log2i(size(brt))
-        push!(init.args, :($(step_l(i)) = 1 << ($raw_locs[$i] - 1)))
-        push!(init.args, :($(step_h(i)) = 1 << $raw_locs[$i]))
-    end
-
-    for i in 1:size(brt), j in 1:size(brt)
-        !ishoisted(brt.expr[i, j]) && continue
-        push!(init.args, :($(Symbol(M, :_, i, j)) = $(brt.expr[i, j])))
-    end
-
-    return init, function kernel(m, b)
-        @gensym index T
-        ret = Expr(:block)
-        indices = []
-        for flag in 0:size(brt)-1
-            idx = m
-            for i in 1:log2i(size(brt))
-                if (flag >>> (i-1)) & 1 == 1
-                    idx = :($idx + $(step_l(i)))
+                for $loc in $(ctx.locs)
+                    $(GlobalRef(BQCESubroutine, :broutine!))($(ctx.st), $(Val(brt.name)), $loc, $(brt.args...))
                 end
-            end
-            push!(indices, idx)
-        end
-        
-        values = []
-        for idx in 0:size(brt)-1
-            index_i = Symbol(index, :_, idx+1)
-            if b === nothing
-                push!(values, :($st[$index_i]))
-            else
-                push!(values, :($st[$b, $index_i]))
+                return $(ctx.st)
             end
         end
+    end
 
-        entries = []
-        assigns = []
-        for i in 1:size(brt.expr, 1)
-            t = Symbol(T, :_, i)
-            e = sym_mul(U(i, 1), values[1])
-
-            for j in 2:size(brt.expr, 2)
-                e = sym_plus(e, sym_mul(U(i, j), values[j]))
-            end
-
-            e == values[i] && continue
-
-            push!(ret.args, :($(Symbol(index, :_, i)) = $(indices[i]) + 1))
-            push!(entries, Expr(:(=), t, e))
-            push!(assigns, Expr(:(=), values[i], t))
-        end
-
-        append!(ret.args, entries)
-        append!(ret.args, assigns)
-
-        b === nothing && return ret
-        return Expr(:for, :($b = axes($st, 1)), ret)
+    def_nlocs!(ctx)
+    def_bmask!(ctx)
+    return codegen_method(ctx, brt, :multi_broutine2x2!) do
+        loop(ctx, brt, true)
     end
 end
 
-function subspace_loop(f, brt::BitRoutine, st, step, b = nothing, max = 3)
+function loop(ctx::BitContext, brt::BitRoutine, multi::Bool=false)
+    lexpr = if brt.isdiag && multi
+        diagonal_loop(diag_kernel(ctx, brt), ctx)
+    elseif brt.isperm && multi
+        subspace_loop(perm_kernel(ctx, brt), ctx, brt)
+    else
+        subspace_loop(generic_kernel(ctx, brt), ctx, brt)
+    end
+    return quote
+        $(hoisted_var_exprs(ctx))
+        $(hoisted_expr(brt.expr))
+        $(fastmath_inbounds(lexpr))
+    end |> fast_eval
+end
+
+function batch_loop(f_kernel, ctx::BitContext)
+    ctx.batch || return f_kernel(nothing)
+    return expand_loop(f_kernel, 1, :(size($(ctx.st), 1)), ctx.expand_sz)
+end
+
+kernel_expr(f_kernel, ctx::BitContext) = m->kernel_expr(f_kernel, ctx, m)
+
+function kernel_expr(f_kernel, ctx::BitContext, m)
+    ex = f_kernel(m)
+    return quote
+        $(kernel_var_exprs(ctx))
+        $(ex)
+    end
+end
+
+function diagonal_loop(f_kernel, ctx::BitContext)
+    kernel = kernel_expr(f_kernel, ctx)
+
+    @gensym m
+    src = Expr(:for, :($m = 0:($(space_length(ctx)) - 1)), kernel(m))
+
+    if ctx.batch
+        return src
+    else # expand inner loop for non-batch operations
+        return quote
+            if $(space_length(ctx)) > $(1 << ctx.expand_sz)
+                $(expand_loop(kernel, 0, :($(space_length(ctx)) - 1), ctx.expand_sz))
+            else
+                $src
+            end
+        end
+    end
+
+    return src
+end
+
+# NOTE: given nthreads find optimal threading region
+#    1. insert an extra location at p so that 2^(n-p-1) ≤ nthreads ≤ 2^(n-p)
+# there are 3 cases in the 2 qubit case xxx0yyy0zzz
+#    1. xxx ≥ nthreads
+#    2. xxx < nthreads && xxxyyy ≥ nthreads
+#    3. xxxyyy < nthreads && xxxyyyzzz ≥ nthreads
+# the general case is similar, basically we want to find the place to insert
+# a slice to the entire hilbert space to parallel it with multithreading
+# the reason why we don't need to do polyhydra analysis here is that we
+# know our full space is a bit-string based hilbert space in advance, so
+# the optimal separation is trivial to find.
+# we also don't do runtime slicing since we will assume the compiled kernels
+# are always specified on small matrices.
+function subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine, max = 3)
+    kernel = kernel_expr(f_kernel, ctx)
     @gensym m
     n = log2i(size(brt))
-    step_l(i) = Symbol(step, :_, i, :_l)
-    step_h(i) = Symbol(step, :_, i, :_h)
     idx(i) = Symbol(m, :_, i)
 
-    N = b === nothing ? :(size($st, 1)) : :(size($st, 2))
-    head = Expr(:block, :($(idx(1)) = 0:$(step_h(n)):$N-$(step_h(n))))
+    def_strides!(ctx, brt)
+    lhead = Expr(:block, :($(idx(1)) = 0:$(step_h(ctx, n)):$(space_length(ctx))-$(step_h(ctx, n))))
 
     # b2 in b1:step_1_h:b1+step_2_l-step_1_h
     for i in 2:n
-        step_i_h = step_h(n-i+1)
-        step_i_1_l = step_l(n-i+2)
-        push!(head.args, :($(idx(i)) = $(idx(i-1)):$step_i_h:$(idx(i-1))+$step_i_1_l-$step_i_h))
+        step_i_h = step_h(ctx, n-i+1)
+        step_i_1_l = step_l(ctx, n-i+2)
+        push!(lhead.args, :($(idx(i)) = $(idx(i-1)):$step_i_h:$(idx(i-1))+$step_i_1_l-$step_i_h))
     end
 
     # b3 in b2:b2+step_1_l-1
-    if b === nothing && max > 0
+    # expand inner subspace loop if it has no batch dim
+    if !ctx.batch && ctx.expand_sz > 0
         ret = Expr(:block)
-        for p in 0:max
+        for p in 0:ctx.expand_sz
             ex = nexprs(1 << p) do k
-                f(:($(idx(n)) + $(k - 1)), b)
+                kernel(:($(idx(n)) + $(k - 1)))
             end
 
             push!(ret.args, quote
-                if $(step_l(1)) == $(1 << p)
-                    $(Expr(:for, head, ex))
-                    return $st
+                if $(step_l(ctx, 1)) == $(1 << p)
+                    $(Expr(:for, lhead, ex))
+                    return $(ctx.st)
                 end
             end)
         end
 
-        ex = nexprs(1 << max) do k
-            f(:($(idx(n+1)) + $(k - 1)), b)
+        ex = nexprs(1 << ctx.expand_sz) do k
+            kernel(:($(idx(n+1)) + $(k - 1)))
         end
-        push!(ret.args, Expr(:for, head, :(
-            for $(idx(n+1)) in $(idx(n)):$(1<<max):$(idx(n))+$(step_l(1))-1
+
+        push!(ret.args, Expr(:for, lhead, :(
+            for $(idx(n+1)) in $(idx(n)):$(1<<max):$(idx(n))+$(step_l(ctx, 1))-1
                 $ex
             end
         )))
-        push!(ret.args, :(return $st))
         return ret
     else
-        push!(head.args, :($(idx(n+1)) = $(idx(n)):$(idx(n))+$(step_l(1))-1))
-        return Expr(:for, head, f(idx(n+1), b))
+        push!(lhead.args, :($(idx(n+1)) = $(idx(n)):$(idx(n))+$(step_l(ctx, 1))-1))
+        return Expr(:for, lhead, kernel(idx(n+1)))
     end
 end
 
-function generic_ctrl_kernel(f_kernel, ctrl)
-    @gensym raw_ctrl ctrl_mask flag_mask
-    init = quote
-        $raw_ctrl = $plain($ctrl)
-        $ctrl_mask = bmask($raw_ctrl)
-        $flag_mask = reduce(+, one(Int) << ($raw_ctrl[i] - 1) for i in 1:length($ctrl) if $ctrl.flags[i])
-    end
-    return init, function kernel(m, b)
-        Expr(:if, :($ismatch($m, $ctrl_mask, $flag_mask)), f_kernel(m, b))
-    end
-end
-
-function multi_broutine2x2! end
-
-# U_{a1,b1}U_{a2,b2} st[b1,b2, ...]
-# U_{a1,0}U_{a2,0} st[0,0, ...] +
-# U_{a1,0}U_{a2,1} st[0,1, ...] +
-# U_{a1,1}U_{a2,0} st[1,0, ...] +
-# U_{a1,1}U_{a2,1} st[1,1, ...] +
-
-# diag element are in power of number ones/zeros
-# a1,a2 = 0,0
-# U_{0,0}U_{0,0} st[0,0, ...]
-# a1,a2 = 0,1
-# U_{0,0}U_{1,1} st[0,1, ...]
-# a1,a2 = 1,0
-# U_{1,1}U_{0,0} st[1,0, ...]
-# a1,a2 = 1,1
-# U_{1,1}U_{1,1} st[1,1, ...]
-function diag_kernel(brt::BitRoutine, st, locs)
-    @gensym l k mask alpha U11 U22
-    init = quote
-        $l = length($locs)
-        $mask = $bmask(Int, $plain($locs))
-    end
-
-    if ishoisted(brt.expr[1, 1])
-        push!(init.args, :($U11 = $(brt.expr[1, 1])) )
-    else
-        U11 = brt.expr[1, 1]
-    end
-
-    if ishoisted(brt.expr[2, 2])
-        push!(init.args, :($U22 = $(brt.expr[2, 2])) )
-    else
-        U22 = brt.expr[2, 2]
-    end
-
-    # hoist common factor
-    if U11 == U22 && !(U11 isa Number && isone(U11))
-        push!(init.args, :($alpha = $U11^$l))
-    end
-
-    return init, function kernel(m, b)
-        entry = b === nothing ? :($st[$m+1]) : :($st[$b, $m+1])
-        if U11 == U22
-            U11 isa Number && isone(U11) && return
-            ex = :($entry = $alpha * $entry)
-            b === nothing && return ex
-            return Expr(:for, :($b in 1:size($st, 1)), ex)
-        end
-
-        ex = :($entry = $U11^($l-$k) * $U22^$k * $entry)
-        ex = elim_double_const_pow(ex)
-        ex = elim_const_pow(ex)
-        ex = elim_identity(ex)
-        ex = elim_exp_pi(ex)
-        ex === nothing && return
-
-        if b === nothing
-            return quote
-                $k = count_ones($m & $mask)
-                $ex
-            end
-        else
-            return quote
-                $k = count_ones($m & $mask)
-                for $b in 1:size($st, 1)
-                    $ex
-                end
-            end
-        end
-    end
-end
-
-# U_{a1,b1}U_{a2,b2} st[b1,b2, ...]
-# U_{a1,0}U_{a2,0} st[0,0, ...] +
-# U_{a1,0}U_{a2,1} st[0,1, ...] +
-# U_{a1,1}U_{a2,0} st[1,0, ...] +
-# U_{a1,1}U_{a2,1} st[1,1, ...] +
-
-# a1,a2 = 0,0
-# U_{0,1}U_{0,1} st[1,1, ...]
-# a1,a2 = 0,1
-# U_{0,1}U_{1,0} st[1,0, ...]
-# a1,a2 = 1,0
-# U_{1,0}U_{0,1} st[0,1, ...]
-# a1,a2 = 1,1
-# U_{1,0}U_{1,0} st[0,0, ...]
-function perm_kernel(brt::BitRoutine, st, locs)
-    @gensym l mask alpha tmp i j k is_len_odd U12 U21 α β
-
-    init = quote
-        $l = length($locs)
-        $mask = bmask(Int, $plain($locs))
-    end
-
-    if ishoisted(brt.expr[1, 2])
-        push!(init.args, :($U12 = $(brt.expr[1, 2])))
-    else
-        U12 = brt.expr[1, 2]
-    end
-
-    if ishoisted(brt.expr[2, 1])
-        push!(init.args, :($U21 = $(brt.expr[2, 1])))
-    else
-        U21 = brt.expr[2, 1]
-    end
-
-    # hoist common factor
-    if U12 == U21 && !(U12 isa Number && isone(U12))
-        push!(init.args, :($alpha = $U21^$l))
-    elseif (U21 isa Number && U12 == -U21) || (U12 == :(-$U21)) || (U21 == :(-$U12))
-        push!(init.args, :($is_len_odd = isodd($l)))
-        if !(U12 isa Number && isone(U12))
-            push!(init.args, :($alpha = $U12^$l))
-        end
-    end
-
-    return init, function kernel(m, b)
-        if b === nothing
-            S1, S2 = :($st[$i]), :($st[$j])
-        else
-            S1, S2 = :($st[$b, $i]), :($st[$b, $j])
-        end
-
-        ex = if U12 == U21
-            if U12 isa Number && isone(U12)
-                alpha = 1
-            end
-            quote
-                $tmp = $S1
-                $S1 = $alpha * $S2
-                $S2 = $alpha * $tmp
-            end
-        elseif (U21 isa Number && U12 == -U21) || (U12 == :(-$U21)) || (U21 == :(-$U12))
-            if U12 isa Number && isone(U12)
-                alpha = 1
-            elseif U12 isa Number && isone(-U12)
-                alpha = -1
-            end
-
-            s_pow(a, b) = quote
-                $S1 = $a * $S2
-                if $is_len_odd
-                    $S2 = $b * $tmp
-                else
-                    $S2 = $a * $tmp
-                end
-            end
-
-            quote
-                $k = count_ones($m & $mask)
-                $tmp = $S1
-                if isodd($k)
-                    $(s_pow(:(-$alpha), alpha))
-                else
-                    $(s_pow(alpha, :(-$alpha)))
-                end
-            end
-        else
-            quote
-                $k = count_ones($m & $mask)
-                $tmp = $S1
-                $S1 = $U12^$k * $U21^($l-$k) * $S2
-                $S2 = $U21^$k * $U12^($l-$k) * $tmp
-            end
-        end
-
-        indices = quote
-            $i = $m + 1
-            $j = ($m ⊻ $mask) + 1
-        end
-
-        if b === nothing
-            return quote
-                $indices    
-                $(elim_identity(ex))
-            end
-        else
-            return quote
-                $indices
-                for $b in 1:size($st, 1)
-                    $(elim_identity(ex))
-                end
-            end
-        end
-    end
-end
-
-space_length(st::AbstractVector) = size(st, 1)
-space_length(st::AbstractMatrix) = size(st, 2)
-
-function broutine2x2_loop_expanded(f_kernel, st, N::Int, b)
-    @gensym m _m Mmax mmax
-    expanded = nexprs(N) do k
-        f_kernel(:($m + $k - 1), b)
+function expand_loop(f_kernel, lb, ub, max::Int=3)
+    @gensym idx1 idx2 idx3 Mmax mmax upperbound
+    N = 1 << max
+    expanded = nexprs(1 << max) do k
+        f_kernel(:($idx1 + $(k - 1)))
     end
 
     return quote
-        $Mmax = $space_length($st) - 1
-        for $_m in 0:($Mmax >>> $(log2i(N)))
-            $m = $_m << $(log2i(N))
-            $mmax = $m + $(N-1)
+        $upperbound = $ub
+        $Mmax = $ub - $lb
+        for $idx2 in 0:($Mmax >>> $max)
+            $idx1 = ($idx2 << $max) + $lb
+            $mmax = $idx1 + $(N-1) - $lb
             if $mmax ≤ $Mmax
                 $expanded
             else
-                for $_m in $m:$Mmax
-                    $(f_kernel(_m, b))
+                for $idx3 in $idx1:$upperbound
+                    $(f_kernel(idx3))
                 end
             end
         end
     end
 end
 
-function broutine2x2_loop(f_kernel, st, N::Int, b)
-    @gensym m
-    src = quote
-        for $m in 0:($space_length($st) - 1)
-            $(f_kernel(m, b))
-        end
+function ctrl_expr(f_kernel, ctx::BitContext, m)
+    if ctx.ctrl isa Symbol
+        @gensym raw_ctrl ctrl_mask flag_mask
+        def!(ctx.hoisted_vars, :ctrl_mask, :($bmask($plain($(ctx.ctrl)))) )
+        def!(ctx.hoisted_vars, :flag_mask, :($ctrl_flag_mask($(ctx.ctrl))) )
     end
 
-    if b === nothing
-        return src
-    else
-        return quote
-            if $space_length($st) > 8
-                $(broutine2x2_loop_expanded(f_kernel, st, N, b))
-            else
-                $src            
+    ret = f_kernel()
+
+    if ctx.ctrl isa Symbol
+        ctrl_mask = ctx.hoisted_vars.ctrl_mask
+        flag_mask = ctx.hoisted_vars.flag_mask
+        ret = Expr(:if, :($ismatch($m, $ctrl_mask, $flag_mask)), ret)
+    end
+    return ret
+end
+
+function sort_locations(ctx::BitContext, sz::Int)
+    sz == 1 && return
+    @gensym raw_locs
+    sz == 2 && return quote
+        $raw_locs = $plain($(ctx.locs))
+        $(ctx.locs) = if $raw_locs[1] < $raw_locs[2]
+            $(ctx.locs)
+        else
+            Locations(($raw_locs[2], $raw_locs[1]))
+        end
+    end
+    return :($(ctx.locs) = sort($(ctx.locs)))
+end
+
+const FASTMATH = Ref(true)
+const INBOUNDS = Ref(true)
+
+hoisted_var_exprs(ctx::BitContext) = var_exprs(ctx.hoisted_vars)
+kernel_var_exprs(ctx::BitContext) = var_exprs(ctx.kernel_vars)
+
+function fastmath_inbounds(ex::Expr)
+    ex = INBOUNDS[] ? :(@inbounds $ex) : ex
+    ex = FASTMATH[] ? :(@fastmath $ex) : ex
+    return ex
+end
+
+function ctrl_flag_mask(ctrl::CtrlLocations)
+    ret = 0
+    for i in 1:length(ctrl)
+        if ctrl.flags[i]
+            ret += 1 << (plain(ctrl)[i] - 1)
+        end
+    end
+    return ret
+end
+
+def_nlocs!(ctx::BitContext) = def!(ctx.hoisted_vars, :nlocs, :(length($(ctx.locs))) )
+def_bmask!(ctx::BitContext) = def!(ctx.hoisted_vars, :mask, :($bmask($plain($(ctx.locs)))) )
+
+# Kernel
+function generic_kernel(ctx::BitContext, brt::BitRoutine)
+    return function kernel(m)
+        @gensym I T
+        index(i) = Symbol(I, :_, i)
+
+        return ctrl_expr(ctx, m) do
+            batch_loop(ctx) do b
+                ret = Expr(:block)
+                indices = []
+                for flag in 0:size(brt)-1
+                    idx = m
+                    for i in 1:log2i(size(brt))
+                        if ((flag >>> (i-1)) & 1) == 1
+                            idx = :($idx + $(step_l(ctx, i)))
+                        end
+                    end
+                    push!(indices, idx)
+                end
+
+                values = [refst(ctx, index(idx), b) for idx in 1:size(brt)]
+                entries, assigns = [], []
+                # NOTE:
+                # we always want to hoist too complicated exprs
+                # for generic kernels
+                for i in 1:size(brt)
+                    t = Symbol(T, :_, i)
+                    should_hoist(brt.expr[i, 1]) && hoist!(brt.expr, i, 1)
+                    e = sym_mul(brt.expr[i, 1], values[1])
+
+                    for j in 2:size(brt)
+                        should_hoist(brt.expr[i, j]) && hoist!(brt.expr, i, j)
+                        e = sym_plus(e, sym_mul(brt.expr[i, j], values[j]))
+                    end
+
+                    e == values[i] && continue
+
+                    push!(ret.args, :($(index(i)) = $(indices[i]) + 1))
+                    push!(entries, Expr(:(=), t, e))
+                    push!(assigns, Expr(:(=), values[i], t))
+                end
+
+                append!(ret.args, entries)
+                append!(ret.args, assigns)
+                return ret
             end
         end
     end
 end
 
-function codegen_broutine2x2_dense(brt::BitRoutine)
-    @gensym T st loc locs gt
-    def = Dict{Symbol, Any}(
-        :name => GlobalRef(BQCESubroutine, :multi_broutine2x2!),
-        :args => Any[:($st::AbstractVecOrMat{$T}), :($gt::Val{$(QuoteNode(brt.name))}), :($locs::Locations), brt.args...],
-        :whereparams => [T, brt.typevars...],
-        :body => quote
-            for $loc in $locs
-                $(GlobalRef(BQCESubroutine, :broutine!))($st, $gt, $loc, $(brt.args...))
-            end
-            return $st
-        end,
-    )
+function diag_kernel(ctx::BitContext, brt::BitRoutine)
+    nlocs = ctx.hoisted_vars.nlocs
+    mask = ctx.hoisted_vars.mask
 
-    return combinedef(def)
+    return function kernel(m)
+        return ctrl_expr(ctx, m) do
+            batch_loop(ctx) do b
+                entry = refst(ctx, :($m+1), b)
+                U11 = brt.expr[1, 1]
+                U22 = brt.expr[2, 2]
+                return @match (U11, U22) begin
+                    (1, 1) => nothing
+                    (1, -1) => begin
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
+                        @defnew ctx.kernel_vars isodd_k = isodd($k)
+                        :($entry = $isodd_k ? -$entry : $entry)
+                    end
+                    (1, A) => begin
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
+                        @defnew ctx.kernel_vars alpha = $A^$k
+                        :($entry = $alpha * $entry)
+                    end
+                    (A, &A) => begin
+                        @def ctx.hoisted_vars alpha = $A^$nlocs
+                        :($entry = $alpha * $entry)
+                    end
+                    (A, B) => begin
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
+                        :($entry = $A^($nlocs-$k) * $B^$k * $entry)
+                    end
+                end # @match
+            end # batch_loop
+        end # ctrl_expr
+    end
+end
+
+function perm_kernel(ctx::BitContext, brt::BitRoutine)
+    nlocs = ctx.hoisted_vars.nlocs
+    mask = ctx.hoisted_vars.mask
+    U12, U21 = brt.expr[1, 2], brt.expr[2, 1]
+
+    function kernel(m)
+        ctrl_expr(ctx, m) do
+            batch_loop(ctx) do b
+                @defnew ctx.kernel_vars i = $m + 1
+                @defnew ctx.kernel_vars j = ($m ⊻ $mask) + 1
+                @defnew ctx.kernel_vars k = count_ones($m & $mask)
+                @gensym tmp
+                S1, S2 = refst(ctx, i, b), refst(ctx, j, b)
+
+                ex = @match (U12, U21) begin
+                    (1, 1) => quote
+                        $S1 = $S2
+                        $S2 = $tmp
+                    end
+                    (A, :(-$(&A))) || (A::Number, &(-A)) => begin
+                        @def ctx.hoisted_vars alpha = $A^$nlocs
+                        @def ctx.hoisted_vars isodd_nlocs = isodd($nlocs)
+                        # step 1:
+                        # $S1 = (-1)^($nlocs-$k) * $alpha * $S2
+                        # $S2 = (-1)^$k * $alpha * $tmp
+                        quote
+                            if isodd($k)
+                                $S1 = $isodd_nlocs ? $alpha * $S2 : -$alpha * $S2
+                                $S2 = -$alpha * $tmp
+                            else
+                                $S1 = $isodd_nlocs ? -$alpha * $S2 : $alpha * $S2
+                                $S2 = $alpha * $tmp
+                            end
+                       end
+                    end
+                    (:(-$A), &A) => begin
+                        @def ctx.hoisted_vars alpha = $A^$nlocs
+                        @def ctx.hoisted_vars isodd_nlocs = isodd($nlocs)
+                        # step 1:
+                        # $S1 = (-1)^$k * $A^$nlocs * $S2
+                        # $S2 = (-1)^($nlocs-$k) * $A^$nlocs * $tmp
+                        quote
+                            if isodd($k)
+                                $S1 = -$alpha * $S2
+                                $S2 = $isodd_nlocs ? $alpha * $tmp : -$alpha * $tmp
+                            else
+                                $S1 = $alpha * $S2
+                                $S2 = $isodd_nlocs ? -$alpha * $tmp : $alpha * $tmp
+                            end
+                        end
+                    end
+                    _ => quote
+                        $S1 = $U12^$k * $U21^($nlocs-$k) * $S2
+                        $S2 = $U21^$k * $U12^($nlocs-$k) * $tmp
+                    end
+                end # @match
+
+                return quote
+                    $tmp = $S1
+                    $ex
+                end
+            end # batch_loop
+        end # ctrl_expr
+    end # kernel
+end
+
+function fast_eval(ex)
+    @smatch ex begin
+        :(1^$p) => 1
+        :((-1)^$p) => :(isodd($p) ? -1 : 1)
+        :(im^$p) => :($literal_pow($(Val(:im)), $p))
+        :((-im)^$p) => :($literal_pow($(Val(:im)), 3 * $p))
+        :(exp(im * π / $k)^$p) => 
+            :($literal_pow($(Val(:exp)), $(Val(k)), $p))
+        ::Expr => Expr(ex.head, map(fast_eval, ex.args)...)
+        _ => ex
+    end
 end
