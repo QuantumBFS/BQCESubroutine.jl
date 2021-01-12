@@ -112,23 +112,20 @@ function Base.show(io::IO, brt::BitRoutine)
     print(io, "]")
 end
 
-mutable struct BitContext
-    hoisted_vars::VarDefs
-    kernel_vars::VarDefs
+Base.@kwdef mutable struct BitContext
+    hoisted_vars::VarDefs = VarDefs()
+    kernel_vars::VarDefs = VarDefs()
 
-    st::Symbol
-    locs::Symbol
-    ctrl
+    st::Symbol = gensym(:st)
+    locs::Symbol = gensym(:locs)
+    ctrl = nothing
 
     # options
-    batch::Bool
+    batch::Bool = false
     # compile params
     # expand the loop with stride 1 << expand_sz
-    expand_sz::Int
+    expand_sz::Int = 3
 end
-
-BitContext(;ctrl=nothing, batch=false) =
-    BitContext(VarDefs(), VarDefs(), gensym(:st), gensym(:locs), ctrl, batch, 3)
 
 step_l(i::Int) = Symbol(:step, :_, i, :_l)
 step_h(i::Int) = Symbol(:step, :_, i, :_h)
@@ -500,7 +497,7 @@ function diag_kernel(ctx::BitContext, brt::BitRoutine)
                     (1, -1) => begin
                         @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         @defnew ctx.kernel_vars isodd_k = isodd($k)
-                        :($entry = $isodd_k ? -$entry : $entry)
+                        :($isodd_k && ($entry = -$entry))
                     end
                     (1, A) => begin
                         @defnew ctx.kernel_vars k = count_ones($m & $mask)
