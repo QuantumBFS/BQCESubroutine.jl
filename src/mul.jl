@@ -35,7 +35,7 @@ function subspace_mul_generic!(st::AbstractVector{T}, indices, U, subspace, offs
     y = similar(st, (size(U, 1), ))
     idx = similar(indices)
 
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         for i in 1:size(U, 1)
             idx[i] = indices[i] + k + offset
         end
@@ -62,7 +62,7 @@ function subspace_mul_generic!(st::AbstractMatrix{T}, indices, U::AbstractMatrix
     y = similar(st, (size(U, 1), ))
     idx = similar(indices)
 
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         for i in 1:size(U, 1)
             idx[i] = k + indices[i] + offset
         end
@@ -99,7 +99,7 @@ function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatri
 
     str = reinterpret(reshape, T, st)
 
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         for j in 1:size(U, 2)
             idx[j] = indices[j] + k + offset
         end
@@ -140,7 +140,7 @@ function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatri
 
     str = reinterpret(reshape, T, st)
     Bmax = size(st,1)
-    for k in subspace
+    @threads for k in subspace
         # idx = k .+ indices
         # _k = k - 1
         for _b ∈ 0:(Bmax-1) >>> 3
@@ -195,7 +195,7 @@ function subspace_mul4x4!(st::AbstractVector{T}, comspace, U, subspace, offset=0
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
 
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
         Base.Cartesian.@nexprs 4 i -> begin
@@ -219,7 +219,7 @@ function subspace_mul8x8!(st::AbstractVector{T}, comspace, U, subspace, offset=0
         Base.Cartesian.@nextract 8 U_i j->U[i, j]
     end
 
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         Base.Cartesian.@nextract 8 idx i-> k + indices_i + offset
         Base.Cartesian.@nexprs 8 i -> begin
             y_i = zero(T)
@@ -242,7 +242,7 @@ function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, su
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
     
-    @inbounds for k in subspace
+    @inbounds @threads for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
         for b in 1:size(st, 1)
