@@ -4,4 +4,6 @@ using LinearAlgebra
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
 using Test
 
-include("broutine.jl")
+@testset "broutine" begin
+    include("broutine.jl")
+end
