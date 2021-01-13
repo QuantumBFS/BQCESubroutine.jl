@@ -26,7 +26,7 @@ Qubit-based quantum circuit subroutine.
 function broutine! end
 
 include("utils.jl")
-# include("threading.jl")
+include("threading.jl")
 
 using .Utilities
 
