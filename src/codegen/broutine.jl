@@ -2,6 +2,11 @@ macro broutine(ex)
     esc(broutine_m(__module__, ex))
 end
 
+function basic_broutine! end
+function multi_broutine2x2! end
+function threaded_basic_broutine! end
+function threaded_multi_broutine2x2! end
+
 struct BitRoutine
     name::Symbol
     sz::Int
@@ -118,10 +123,11 @@ Base.@kwdef mutable struct BitContext
 
     st::Symbol = gensym(:st)
     locs::Symbol = gensym(:locs)
-    ctrl = nothing
+    ctrl::Union{Nothing, Symbol} = nothing
 
     # options
     batch::Bool = false
+    threading::Bool = false
     # compile params
     # expand the loop with stride 1 << expand_sz
     expand_sz::Int = 3
@@ -135,9 +141,10 @@ space_length(ctx::BitContext) = ctx.batch ? :(size($(ctx.st), 2)) : :(size($(ctx
 refst(ctx::BitContext, i, b = nothing) = b === nothing ? :($(ctx.st)[$i]) : :($(ctx.st)[$b, $i])
 
 function def_strides!(ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
     for i in 1:log2i(size(brt))
-        def!(ctx.hoisted_vars, step_l(i), :(1 << ($plain($(ctx.locs))[$i] - 1)) )
-        def!(ctx.hoisted_vars, step_h(i), :(1 << $plain($(ctx.locs))[$i]) )
+        def!(ctx.hoisted_vars, step_l(i), :(1 << ($plain_locs[$i] - 1)) )
+        def!(ctx.hoisted_vars, step_h(i), :(1 << $plain_locs[$i]) )
     end
     return ctx
 end
@@ -146,6 +153,7 @@ function codegen_method(f_body, ctx::BitContext, brt::BitRoutine, name::Symbol)
     T = ctx.batch ? AbstractMatrix : AbstractVector
     args = Any[:($(ctx.st)::$T), :(::Val{$(QuoteNode(brt.name))}), :($(ctx.locs)::$Locations)]
     ctx.ctrl === nothing || push!(args, :($(ctx.ctrl)::$CtrlLocations))
+    ctx.threading && (name = Symbol(:threaded_, name))
     append!(args, brt.args)
     def = Dict{Symbol, Any}(
         :name => GlobalRef(BQCESubroutine, name),
@@ -187,32 +195,68 @@ function broutine_m(m::Module, ex::Expr)
     end
 
     ret = Expr(:block)
-    for batch in [false, true], ctrl in [nothing, gensym(:ctrl)]
-        push!(ret.args, codegen_broutine(BitContext(;ctrl, batch), brt))
+    for batch in [false, true], ctrl in [nothing, gensym(:ctrl)], threading in [false, true]
+        push!(ret.args, codegen_broutine(
+            BitContext(;ctrl, batch, threading), brt)
+        )
+        push!(ret.args, codegen_basic_broutine(
+            BitContext(;ctrl, batch, threading), brt)
+        )
         # generate multi-gate routine for 2x2
         if size(brt) == 2
-            ctx = BitContext(;ctrl, batch)
-            push!(ret.args, codegen_broutine2x2_multi(ctx, brt))
+            push!(ret.args, codegen_broutine2x2_multi(
+                BitContext(;ctrl, batch, threading), brt)
+            )
         end
     end
     push!(ret.args, binding)
     return ret
 end
 
+function forward_routine(to::Symbol, ctx::BitContext, brt::BitRoutine)
+    call = Expr(:call, GlobalRef(BQCESubroutine, to),
+            ctx.st, Val(brt.name), ctx.locs)
+    ctx.ctrl isa Symbol && push!(call.args, ctx.ctrl)
+    append!(call.args, brt.args)
+    return call
+end
+
 function codegen_broutine(ctx::BitContext, brt::BitRoutine)
+    ctx.threading && return # do not generate threading version
     return codegen_method(ctx, brt, :broutine!) do
-        body = Expr(:block)
-        push!(body.args, sort_locations(ctx, log2i(size(brt))))
-        # NOTE: multi-gate only supports non-ctrl routine
-        if ctx.ctrl === nothing
-            multi = Expr(:call, GlobalRef(BQCESubroutine, :multi_broutine2x2!),
-                ctx.st, Val(brt.name), ctx.locs)
-            append!(multi.args, brt.args)
-            size(brt) == 2 && push!(body.args, :(length($(ctx.locs)) == 1 || return $multi))
+        basic_ret = Expr(:block)
+        assertion = :(@assert length($(ctx.locs)) == $(log2i(size(brt))) "number of locations mismatch operator size")
+        if size(brt) == 2
+            multi = forward_routine(:multi_broutine2x2!, ctx, brt)
+            push!(basic_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
         end
-        push!(body.args, :(@assert length($(ctx.locs)) == $(log2i(size(brt))) "number of locations mismatch operator size"))
-        push!(body.args, loop(ctx, brt))
-        return body
+        push!(basic_ret.args, assertion)
+        push!(basic_ret.args, forward_routine(:basic_broutine!, ctx, brt))
+        push!(basic_ret.args, :(return $(ctx.st)))
+
+        threaded_ret = Expr(:block)
+        if size(brt) == 2
+            multi = forward_routine(:threaded_multi_broutine2x2!, ctx, brt)
+            push!(threaded_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
+        end
+        push!(threaded_ret.args, assertion)
+        push!(threaded_ret.args, forward_routine(:threaded_basic_broutine!, ctx, brt))
+        push!(threaded_ret.args, :(return $(ctx.st)))
+        return quote
+            if $BQCESubroutine.ENABLE_THREADS[] && Threads.nthreads() > 1
+                $threaded_ret
+            end
+            $basic_ret
+        end
+    end
+end
+
+function codegen_basic_broutine(ctx::BitContext, brt::BitRoutine)
+    return codegen_method(ctx, brt, :basic_broutine!) do
+        return quote
+            $(sort_locations(ctx, log2i(size(brt))))
+            $(broutine_loop(ctx, brt))
+        end
     end
 end
 
@@ -222,24 +266,24 @@ function codegen_broutine2x2_multi(ctx::BitContext, brt::BitRoutine)
     # it will make our loop kernel too complicated
     if !isempty(brt.args) || (!brt.isdiag && !brt.isperm)
         @gensym loc
+        name = ctx.threading ? :threaded_broutine! : :broutine!
+        fn = GlobalRef(BQCESubroutine, name)
         return codegen_method(ctx, brt, :multi_broutine2x2!) do
             quote
                 for $loc in $(ctx.locs)
-                    $(GlobalRef(BQCESubroutine, :broutine!))($(ctx.st), $(Val(brt.name)), $loc, $(brt.args...))
+                    $fn($(ctx.st), $(Val(brt.name)), $loc, $(brt.args...))
                 end
                 return $(ctx.st)
             end
         end
     end
 
-    def_nlocs!(ctx)
-    def_bmask!(ctx)
     return codegen_method(ctx, brt, :multi_broutine2x2!) do
-        loop(ctx, brt, true)
+        broutine_loop(ctx, brt, true)
     end
 end
 
-function loop(ctx::BitContext, brt::BitRoutine, multi::Bool=false)
+function broutine_loop(ctx::BitContext, brt::BitRoutine, multi::Bool=false)
     lexpr = if brt.isdiag && multi
         diagonal_loop(diag_kernel(ctx, brt), ctx)
     elseif brt.isperm && multi
@@ -273,21 +317,34 @@ function diagonal_loop(f_kernel, ctx::BitContext)
     kernel = kernel_expr(f_kernel, ctx)
 
     @gensym m
-    src = Expr(:for, :($m = 0:($(space_length(ctx)) - 1)), kernel(m))
-
-    if ctx.batch
-        return src
-    else # expand inner loop for non-batch operations
-        return quote
-            if $(space_length(ctx)) > $(1 << ctx.expand_sz)
-                $(expand_loop(kernel, 0, :($(space_length(ctx)) - 1), ctx.expand_sz))
-            else
-                $src
+    expanded = expand_loop(kernel, 0, :($(space_length(ctx)) - 1), ctx.expand_sz, ctx.threading)
+    if ctx.threading
+        src = :(
+            Threads.@threads for $m = 0:($(space_length(ctx)) - 1)
+                $(kernel(m))
             end
+        )
+    else
+        src = Expr(:for, :($m = 0:($(space_length(ctx)) - 1)), kernel(m))
+    end
+
+    ctx.batch && return src
+    sz = space_length(ctx)
+    ctx.threading && return quote
+        if $sz > Threads.nthreads() * ($(1 << ctx.expand_sz))
+            $expanded
+        else
+            $src
         end
     end
 
-    return src
+    return quote
+        if $sz > $(1 << ctx.expand_sz)
+            $expanded
+        else
+            $src
+        end
+    end
 end
 
 # NOTE: given nthreads find optimal threading region
@@ -303,82 +360,164 @@ end
 # the optimal separation is trivial to find.
 # we also don't do runtime slicing since we will assume the compiled kernels
 # are always specified on small matrices.
-function subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine, max = 3)
+function subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
+    ctx.threading && return threaded_subspace_loop(f_kernel, ctx, brt)
     kernel = kernel_expr(f_kernel, ctx)
     @gensym m
     n = log2i(size(brt))
     idx(i) = Symbol(m, :_, i)
-
-    def_strides!(ctx, brt)
-    lhead = Expr(:block, :($(idx(1)) = 0:$(step_h(ctx, n)):$(space_length(ctx))-$(step_h(ctx, n))))
-
-    # b2 in b1:step_1_h:b1+step_2_l-step_1_h
-    for i in 2:n
-        step_i_h = step_h(ctx, n-i+1)
-        step_i_1_l = step_l(ctx, n-i+2)
-        push!(lhead.args, :($(idx(i)) = $(idx(i-1)):$step_i_h:$(idx(i-1))+$step_i_1_l-$step_i_h))
-    end
+    lheads = subspace_loop_head(idx, ctx, brt)
+    lhead = Expr(:block, lheads...)
 
     # b3 in b2:b2+step_1_l-1
     # expand inner subspace loop if it has no batch dim
     if !ctx.batch && ctx.expand_sz > 0
-        ret = Expr(:block)
-        for p in 0:ctx.expand_sz
-            ex = nexprs(1 << p) do k
-                kernel(:($(idx(n)) + $(k - 1)))
-            end
-
-            push!(ret.args, quote
-                if $(step_l(ctx, 1)) == $(1 << p)
-                    $(Expr(:for, lhead, ex))
-                    return $(ctx.st)
-                end
-            end)
-        end
-
-        ex = nexprs(1 << ctx.expand_sz) do k
-            kernel(:($(idx(n+1)) + $(k - 1)))
-        end
-
-        push!(ret.args, Expr(:for, lhead, :(
-            for $(idx(n+1)) in $(idx(n)):$(1<<max):$(idx(n))+$(step_l(ctx, 1))-1
-                $ex
-            end
-        )))
-        return ret
+        return subspace_step_expanded(identity, kernel, lheads, idx, ctx, brt)
     else
         push!(lhead.args, :($(idx(n+1)) = $(idx(n)):$(idx(n))+$(step_l(ctx, 1))-1))
         return Expr(:for, lhead, kernel(idx(n+1)))
     end
 end
 
-function expand_loop(f_kernel, lb, ub, max::Int=3)
+function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
+    def_strides!(ctx, brt)
+    n = log2i(size(brt))
+    lheads = []
+    push!(lheads, :($(idx(1)) = 0:$(step_h(ctx, n)):$(space_length(ctx))-$(step_h(ctx, n))))
+
+    # b2 in b1:step_1_h:b1+step_2_l-step_1_h
+    for i in 2:n
+        step_i_h = step_h(ctx, n-i+1)
+        step_i_1_l = step_l(ctx, n-i+2)
+        push!(lheads, :($(idx(i)) = $(idx(i-1)):$step_i_h:$(idx(i-1))+$step_i_1_l-$step_i_h))
+    end
+    return lheads
+end
+
+function subspace_step_expanded(outer, kernel, inner::Vector, idx, ctx::BitContext, brt::BitRoutine)
+    n = log2i(size(brt))
+    ret = Expr(:block)
+
+    loop_expr(x) = if isempty(inner)
+        outer(x)
+    else
+        outer(Expr(:for, Expr(:block, inner...), x))
+    end
+
+    for p in 0:ctx.expand_sz
+        ex = nexprs(1 << p) do k
+            kernel(:($(idx(n)) + $(k - 1)))
+        end
+
+        push!(ret.args, quote
+            if $(step_l(ctx, 1)) == $(1 << p)
+                $(loop_expr(ex))
+                return $(ctx.st)
+            end
+        end)
+    end
+
+    ex = nexprs(1 << ctx.expand_sz) do k
+        kernel(:($(idx(n+1)) + $(k - 1)))
+    end
+
+    lbody = :(for $(idx(n+1)) in $(idx(n)):$(1<<ctx.expand_sz):$(idx(n))+$(step_l(ctx, 1))-1
+        $ex
+    end)
+
+    push!(ret.args, loop_expr(lbody))
+    return ret
+end
+
+function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
+    @def ctx.hoisted_vars nqubits = $log2i($(space_length(ctx)))
+    @def ctx.hoisted_vars nlocs_needed = $log2i(Threads.nthreads()-1) + 1
+    @gensym idx base m
+
+    kernel = kernel_expr(f_kernel, ctx)
+    index(i) = Symbol(idx, :_, i)
+    index_base(i) = :($base + $(index(i)))
+
+    n = log2i(size(brt))
+    lheads = subspace_loop_head(index, ctx, brt)
+
+    ret = Expr(:block)
+    tbody = subspace_step_expanded(kernel, lheads[2:end], index, ctx, brt) do x
+        # Expr(:for, lheads[1], x)
+        :(Threads.@threads $(Expr(:for, lheads[1], x)))
+    end
+    
+    push!(ret.args, :(
+        if $nlocs_needed ≤ $nqubits - $plain_locs[$n]
+            $tbody
+            return $(ctx.st)
+        end
+    ))
+
+    for t in 1:n-1
+        tbody = subspace_step_expanded(idx->kernel(:($base + $idx)), lheads[t+1:end], index, ctx, brt) do x
+            subspace_locs = Expr(:tuple, :(1:$m...), [:(plain_locs[$(n-k+1)]) for k in 1:t]...)
+            subspace_head = :($base = $bsubspace($nqubits, $subspace_locs))
+            # Expr(:for, subspace_head, x)
+            :(Threads.@threads $(Expr(:for, subspace_head, x)))
+        end
+
+        push!(ret.args, :(
+            if $nlocs_needed ≤ $nqubits - $plain_locs[$(n-t)] - $t
+                $m = $nqubits - $nlocs_needed - $t
+                $tbody
+                return $(ctx.st)
+            end
+        ))
+    end
+
+    push!(ret.args, quote
+        $m = $nqubits - $nlocs_needed - $n
+        Threads.@threads for $base in $bsubspace($nqubits, (1:$m..., $plain_locs...))
+            for $(index(1)) in 0:(1 << $m)-1
+                $(kernel( index_base(1) ))
+            end
+        end
+    end)
+    push!(ret.args, :(return $(ctx.st)))
+    return ret
+end
+
+function expand_loop(f_kernel, lb, ub, max::Int=3, threading=false)
     @gensym idx1 idx2 idx3 Mmax mmax upperbound
     N = 1 << max
     expanded = nexprs(1 << max) do k
         f_kernel(:($idx1 + $(k - 1)))
     end
 
+    lbody = :(for $idx2 in 0:($Mmax >>> $max)
+        $idx1 = ($idx2 << $max) + $lb
+        $mmax = $idx1 + $(N-1) - $lb
+        if $mmax ≤ $Mmax
+            $expanded
+        else
+            for $idx3 in $idx1:$upperbound
+                $(f_kernel(idx3))
+            end
+        end
+    end)
+
+    threading && return quote
+        $upperbound = $ub
+        $Mmax = $ub - $lb
+        Threads.@threads $lbody
+    end
+
     return quote
         $upperbound = $ub
         $Mmax = $ub - $lb
-        for $idx2 in 0:($Mmax >>> $max)
-            $idx1 = ($idx2 << $max) + $lb
-            $mmax = $idx1 + $(N-1) - $lb
-            if $mmax ≤ $Mmax
-                $expanded
-            else
-                for $idx3 in $idx1:$upperbound
-                    $(f_kernel(idx3))
-                end
-            end
-        end
+        $lbody
     end
 end
 
 function ctrl_expr(f_kernel, ctx::BitContext, m)
     if ctx.ctrl isa Symbol
-        @gensym raw_ctrl ctrl_mask flag_mask
         def!(ctx.hoisted_vars, :ctrl_mask, :($bmask($plain($(ctx.ctrl)))) )
         def!(ctx.hoisted_vars, :flag_mask, :($ctrl_flag_mask($(ctx.ctrl))) )
     end
@@ -395,15 +534,17 @@ end
 
 function sort_locations(ctx::BitContext, sz::Int)
     sz == 1 && return
-    @gensym raw_locs
-    sz == 2 && return quote
-        $raw_locs = $plain($(ctx.locs))
-        $(ctx.locs) = if $raw_locs[1] < $raw_locs[2]
-            $(ctx.locs)
-        else
-            Locations(($raw_locs[2], $raw_locs[1]))
+
+    if sz == 2
+        @gensym plain_locs
+        return quote
+            $plain_locs = $plain($(ctx.locs))
+            if $plain_locs[1] > $plain_locs[2]
+                $(ctx.locs) = Locations(($plain_locs[2], $plain_locs[1]))
+            end
         end
     end
+
     return :($(ctx.locs) = sort($(ctx.locs)))
 end
 
@@ -428,9 +569,6 @@ function ctrl_flag_mask(ctrl::CtrlLocations)
     end
     return ret
 end
-
-def_nlocs!(ctx::BitContext) = def!(ctx.hoisted_vars, :nlocs, :(length($(ctx.locs))) )
-def_bmask!(ctx::BitContext) = def!(ctx.hoisted_vars, :mask, :($bmask($plain($(ctx.locs)))) )
 
 # Kernel
 function generic_kernel(ctx::BitContext, brt::BitRoutine)
@@ -483,9 +621,6 @@ function generic_kernel(ctx::BitContext, brt::BitRoutine)
 end
 
 function diag_kernel(ctx::BitContext, brt::BitRoutine)
-    nlocs = ctx.hoisted_vars.nlocs
-    mask = ctx.hoisted_vars.mask
-
     return function kernel(m)
         return ctrl_expr(ctx, m) do
             batch_loop(ctx) do b
@@ -495,20 +630,28 @@ function diag_kernel(ctx::BitContext, brt::BitRoutine)
                 return @match (U11, U22) begin
                     (1, 1) => nothing
                     (1, -1) => begin
+                        @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
+                        @def ctx.hoisted_vars mask = $bmask($plain_locs)
                         @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         @defnew ctx.kernel_vars isodd_k = isodd($k)
                         :($isodd_k && ($entry = -$entry))
                     end
                     (1, A) => begin
+                        @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
+                        @def ctx.hoisted_vars mask = $bmask($plain_locs)
                         @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         @defnew ctx.kernel_vars alpha = $A^$k
                         :($entry = $alpha * $entry)
                     end
                     (A, &A) => begin
+                        @def ctx.hoisted_vars nlocs = length($(ctx.locs))
                         @def ctx.hoisted_vars alpha = $A^$nlocs
                         :($entry = $alpha * $entry)
                     end
                     (A, B) => begin
+                        @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
+                        @def ctx.hoisted_vars mask = $bmask($plain_locs)
+                        @def ctx.hoisted_vars nlocs = length($(ctx.locs))
                         @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         :($entry = $A^($nlocs-$k) * $B^$k * $entry)
                     end
@@ -519,16 +662,15 @@ function diag_kernel(ctx::BitContext, brt::BitRoutine)
 end
 
 function perm_kernel(ctx::BitContext, brt::BitRoutine)
-    nlocs = ctx.hoisted_vars.nlocs
-    mask = ctx.hoisted_vars.mask
     U12, U21 = brt.expr[1, 2], brt.expr[2, 1]
 
     function kernel(m)
         ctrl_expr(ctx, m) do
             batch_loop(ctx) do b
+                @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
+                @def ctx.hoisted_vars mask = $bmask($plain_locs)
                 @defnew ctx.kernel_vars i = $m + 1
                 @defnew ctx.kernel_vars j = ($m ⊻ $mask) + 1
-                @defnew ctx.kernel_vars k = count_ones($m & $mask)
                 @gensym tmp
                 S1, S2 = refst(ctx, i, b), refst(ctx, j, b)
 
@@ -538,8 +680,10 @@ function perm_kernel(ctx::BitContext, brt::BitRoutine)
                         $S2 = $tmp
                     end
                     (A, :(-$(&A))) || (A::Number, &(-A)) => begin
+                        @def ctx.hoisted_vars nlocs = length($(ctx.locs))
                         @def ctx.hoisted_vars alpha = $A^$nlocs
                         @def ctx.hoisted_vars isodd_nlocs = isodd($nlocs)
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         # step 1:
                         # $S1 = (-1)^($nlocs-$k) * $alpha * $S2
                         # $S2 = (-1)^$k * $alpha * $tmp
@@ -554,8 +698,10 @@ function perm_kernel(ctx::BitContext, brt::BitRoutine)
                        end
                     end
                     (:(-$A), &A) => begin
+                        @def ctx.hoisted_vars nlocs = length($(ctx.locs))
                         @def ctx.hoisted_vars alpha = $A^$nlocs
                         @def ctx.hoisted_vars isodd_nlocs = isodd($nlocs)
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
                         # step 1:
                         # $S1 = (-1)^$k * $A^$nlocs * $S2
                         # $S2 = (-1)^($nlocs-$k) * $A^$nlocs * $tmp
@@ -569,9 +715,13 @@ function perm_kernel(ctx::BitContext, brt::BitRoutine)
                             end
                         end
                     end
-                    _ => quote
-                        $S1 = $U12^$k * $U21^($nlocs-$k) * $S2
-                        $S2 = $U21^$k * $U12^($nlocs-$k) * $tmp
+                    _ => begin
+                        @def ctx.hoisted_vars nlocs = length($(ctx.locs))
+                        @defnew ctx.kernel_vars k = count_ones($m & $mask)
+                        quote
+                            $S1 = $U12^$k * $U21^($nlocs-$k) * $S2
+                            $S2 = $U21^$k * $U12^($nlocs-$k) * $tmp
+                        end
                     end
                 end # @match
 
