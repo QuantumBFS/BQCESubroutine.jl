@@ -736,7 +736,7 @@ function perm_kernel(ctx::BitContext, brt::BitRoutine)
 end
 
 function fast_eval(ex)
-    @smatch ex begin
+    @match ex begin
         :(1^$p) => 1
         :((-1)^$p) => :(isodd($p) ? -1 : 1)
         :(im^$p) => :($literal_pow($(Val(:im)), $p))

@@ -2,7 +2,6 @@ module BQCESubroutine
 
 export broutine!, @broutine
 
-using MatchCore
 using MLStyle
 using ExprTools
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, AbstractLocations, merge_locations
