@@ -196,16 +196,17 @@ function broutine_m(m::Module, ex::Expr)
 
     ret = Expr(:block)
     for batch in [false, true], ctrl in [nothing, gensym(:ctrl)], threading in [false, true]
+        expand_sz = threading ? 0 : 3
         push!(ret.args, codegen_broutine(
-            BitContext(;ctrl, batch, threading), brt)
+            BitContext(;ctrl, batch, threading, expand_sz), brt)
         )
         push!(ret.args, codegen_basic_broutine(
-            BitContext(;ctrl, batch, threading), brt)
+            BitContext(;ctrl, batch, threading, expand_sz), brt)
         )
         # generate multi-gate routine for 2x2
         if size(brt) == 2
             push!(ret.args, codegen_broutine2x2_multi(
-                BitContext(;ctrl, batch, threading), brt)
+                BitContext(;ctrl, batch, threading, expand_sz), brt)
             )
         end
     end
