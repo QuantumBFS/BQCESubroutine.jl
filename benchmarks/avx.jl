@@ -1,7 +1,7 @@
 using BQCESubroutine.Utilities
 using BenchmarkTools
 using LoopVectorization
-using PaddedMatrices
+using StrideArrays
 using YaoLocations
 
 function subspace_mul!(st::AbstractMatrix, comspace, U::AbstractMatrix{T}, subspace) where T
@@ -28,15 +28,15 @@ function subspace_mul!(st::AbstractMatrix, comspace, U::AbstractMatrix{T}, subsp
 end
 
 function subspace_mul_avx!(st::AbstractMatrix, comspace, U::AbstractMatrix{Complex{T}}, subspace) where T
-    indices = StrideArray{Int}(undef, (PaddedMatrices.static_length(comspace), ))
+    indices = StrideArray{Int}(undef, (StrideArrays.static_length(comspace), ))
     @simd ivdep for i in eachindex(indices)
         indices[i] = comspace[i] + 1
     end
 
-    C_re = StrideArray{T}(undef, (PaddedMatrices.static_length(indices), StaticInt{32}()))
-    C_im = StrideArray{T}(undef, (PaddedMatrices.static_length(indices), StaticInt{32}()))
-    U_re = StrideArray{T}(undef, (PaddedMatrices.size(U, StaticInt{1}()), PaddedMatrices.size(U, StaticInt{2}())))
-    U_im = StrideArray{T}(undef, (PaddedMatrices.size(U, StaticInt{1}()), PaddedMatrices.size(U, StaticInt{2}())))
+    C_re = StrideArray{T}(undef, (StrideArrays.static_length(indices), StaticInt{32}()))
+    C_im = StrideArray{T}(undef, (StrideArrays.static_length(indices), StaticInt{32}()))
+    U_re = StrideArray{T}(undef, (StrideArrays.size(U, StaticInt{1}()), StrideArrays.size(U, StaticInt{2}())))
+    U_im = StrideArray{T}(undef, (StrideArrays.size(U, StaticInt{1}()), StrideArrays.size(U, StaticInt{2}())))
     Ur = reinterpret(reshape, T, U)
 
     @inbounds @simd ivdep for i ∈ eachindex(U_re)

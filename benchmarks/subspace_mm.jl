@@ -8,7 +8,7 @@ using BenchmarkTools
 using YaoArrayRegister
 using LoopVectorization
 using BQCESubroutine: subspace_mul!, subspace_mul_generic!, subspace_mul4x4!
-using PaddedMatrices
+using StrideArrays
 
 function subspace_smm!(st::AbstractMatrix, indices, U::AbstractMatrix, subspace)
     @inbounds @views for k in subspace

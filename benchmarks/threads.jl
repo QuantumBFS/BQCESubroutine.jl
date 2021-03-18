@@ -6,7 +6,7 @@ using Test
 using BenchmarkTools
 using YaoArrayRegister
 using LoopVectorization
-using PaddedMatrices
+using StrideArrays
 using MatchCore
 using MLStyle
 using BQCESubroutine: BitContext, BitRoutine

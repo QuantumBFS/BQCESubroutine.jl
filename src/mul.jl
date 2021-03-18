@@ -84,7 +84,7 @@ function subspace_mul_generic!(st::AbstractMatrix{T}, indices, U::AbstractMatrix
 end
 
 function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = PaddedMatrices.static_length(indices)
+    D = StrideArrays.static_length(indices)
     y_re = StrideArray{T}(undef, (D, ))
     y_im = StrideArray{T}(undef, (D, ))
     U_re = StrideArray{T}(undef, (D, D))
@@ -126,7 +126,7 @@ function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatri
 end
 
 function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = PaddedMatrices.static_length(indices)
+    D = StrideArrays.static_length(indices)
     C_re = StrideArray{T}(undef, (D, StaticInt{8}()))
     C_im = StrideArray{T}(undef, (D, StaticInt{8}()))
     U_re = StrideArray{T}(undef, (D, D))
