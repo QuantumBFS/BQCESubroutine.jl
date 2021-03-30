@@ -84,7 +84,7 @@ function subspace_mul_generic!(st::AbstractMatrix{T}, indices, U::AbstractMatrix
 end
 
 function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = PaddedMatrices.static_length(indices)
+    D = StrideArrays.static_length(indices)
     y_re = StrideArray{T}(undef, (D, ))
     y_im = StrideArray{T}(undef, (D, ))
     U_re = StrideArray{T}(undef, (D, D))
@@ -92,9 +92,9 @@ function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatri
     idx = StrideArray{eltype(indices)}(undef, (D, ))
     Ur = reinterpret(reshape, T, U)
 
-    @inbounds @simd ivdep for i ∈ eachindex(U_re)
-        U_re[i] = Ur[1,i]
-        U_im[i] = Ur[2,i]
+    @inbounds @simd ivdep for i ∈ 1:length(U_re)
+        U_re[i] = Ur[2i-1]
+        U_im[i] = Ur[2i]
     end
 
     str = reinterpret(reshape, T, st)
@@ -126,16 +126,16 @@ function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatri
 end
 
 function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = PaddedMatrices.static_length(indices)
+    D = StrideArrays.static_length(indices)
     C_re = StrideArray{T}(undef, (D, StaticInt{8}()))
     C_im = StrideArray{T}(undef, (D, StaticInt{8}()))
     U_re = StrideArray{T}(undef, (D, D))
     U_im = StrideArray{T}(undef, (D, D))
     Ur = reinterpret(reshape, T, U)
 
-    @inbounds @simd ivdep for i ∈ eachindex(U_re)
-        U_re[i] = Ur[1,i]
-        U_im[i] = Ur[2,i]
+    @inbounds @simd ivdep for i in 1:length(U_re)
+        U_re[i] = Ur[2i-1]
+        U_im[i] = Ur[2i]
     end
 
     str = reinterpret(reshape, T, st)

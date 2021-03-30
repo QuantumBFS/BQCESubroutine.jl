@@ -7,7 +7,7 @@ using ExprTools
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, AbstractLocations, merge_locations
 using LinearAlgebra
 using LoopVectorization
-using PaddedMatrices
+using StrideArrays
 
 """
     broutine!(st, op, locs[, ctrl, args...])

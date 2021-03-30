@@ -89,18 +89,20 @@ end
 
         @testset "$i=>$G" for i in 1:N
             locs = Locations(i)
-            @test broutine!(copy(st), Val(G), locs) ≈ naive_broutine!(copy(st), U, locs)
+            @test isapprox(broutine!(copy(st), Val(G), locs), naive_broutine!(copy(st), U, locs); rtol=1e-8)
         end
 
         @testset "($i, $(mod1(i+1, N)))=>$G" for i in 1:N
             locs = sort(Locations((i, mod1(i+2, N))))
-            @test broutine!(copy(st), Val(G), locs) ≈ naive_broutine_multi!(copy(st), U, locs)
+            S1 = broutine!(copy(st), Val(G), locs)
+            S2 = naive_broutine_multi!(copy(st), U, locs)
+            @test isapprox(S1, S2; rtol=1e-8)
         end
 
         @testset "@ctrl $(mod1(i+1, N)) $i=>$G" for i in 1:N
             locs = Locations(i)
             ctrl = CtrlLocations(mod1(i+1, N))
-            @test broutine!(copy(st), Val(G), locs, ctrl) ≈ naive_broutine!(copy(st), U, locs, ctrl)
+            @test isapprox(broutine!(copy(st), Val(G), locs, ctrl), naive_broutine!(copy(st), U, locs, ctrl); rtol=1e-8)
         end
     end
 end
