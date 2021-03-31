@@ -13,6 +13,9 @@ StrideArrays = "d1fa6d79-ef01-42a6-86c9-f7c551f8593b"
 VectorizationBase = "3d5dd08c-fd9d-11e8-17fa-ed2836048c2f"
 YaoLocations = "66df03fb-d475-48f7-b449-3d9064bf085b"
 
+[compat]
+MLStyle = "0.4"
+
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
