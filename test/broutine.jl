@@ -4,6 +4,8 @@ using BQCESubroutine
 using BQCESubroutine.Utilities
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
 using BQCESubroutine: ctrl_offset
+using ThreadingUtilities
+using BQCESubroutine.Utilities: BitSubspace
 
 function naive_broutine!(st::AbstractVector, U, locs)
     n = log2dim(st)

@@ -125,68 +125,7 @@ function subspace_mul_generic!(st::Vector{Complex{T}}, indices, U::AbstractMatri
     return st
 end
 
-function subspace_mul_generic!(st::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = StrideArrays.static_length(indices)
-    C_re = StrideArray{T}(undef, (D, StaticInt{8}()))
-    C_im = StrideArray{T}(undef, (D, StaticInt{8}()))
-    U_re = StrideArray{T}(undef, (D, D))
-    U_im = StrideArray{T}(undef, (D, D))
-    Ur = reinterpret(reshape, T, U)
 
-    @inbounds @simd ivdep for i in 1:length(U_re)
-        U_re[i] = Ur[2i-1]
-        U_im[i] = Ur[2i]
-    end
-
-    str = reinterpret(reshape, T, st)
-    Bmax = size(st,1)
-    @threads for k in subspace
-        # idx = k .+ indices
-        # _k = k - 1
-        for _b ∈ 0:(Bmax-1) >>> 3
-            b =    _b << 3;
-            bmax = b + 8
-            if bmax ≤ Bmax # full static block
-                @avx for n ∈ 1:8, m ∈ axes(U_re, 1)
-                    C_re_m_n = zero(T)
-                    C_im_m_n = zero(T)
-                    for i ∈ axes(U_re, 2)
-                        str_i = k + indices[i] + offset
-                        C_re_m_n += U_re[m,i] * str[1,n+b,str_i] - U_im[m,i] * str[2,n+b,str_i]
-                        C_im_m_n += U_re[m,i] * str[2,n+b,str_i] + U_im[m,i] * str[1,n+b,str_i]
-                    end
-                    C_re[m,n] = C_re_m_n
-                    C_im[m,n] = C_im_m_n
-                end
-                @avx for n ∈ 1:8, m ∈ axes(U_re, 1)
-                    str_m = k + indices[m] + offset
-                    str[1,n+b,str_m] = C_re[m,n]
-                    str[2,n+b,str_m] = C_im[m,n]
-                end
-                # AmulB!(C_re, C_im, U_re, U_im, 
-            else # dynamic block
-                Nmax = 8 + Bmax - bmax
-                @avx for n ∈ 1:Nmax, m ∈ axes(U_re, 1)
-                    C_re_m_n = zero(T)
-                    C_im_m_n = zero(T)
-                    for i ∈ axes(U_re, 2)
-                        str_i = k + indices[i] + offset
-                        C_re_m_n += U_re[m,i] * str[1,n+b,str_i] - U_im[m,i] * str[2,n+b,str_i]
-                        C_im_m_n += U_re[m,i] * str[2,n+b,str_i] + U_im[m,i] * str[1,n+b,str_i]
-                    end
-                    C_re[m,n] = C_re_m_n
-                    C_im[m,n] = C_im_m_n
-                end
-                @avx for n ∈ 1:Nmax, m ∈ axes(U_re, 1)
-                    str_m = k + indices[m] + offset
-                    str[1,n+b,str_m] = C_re[m,n]
-                    str[2,n+b,str_m] = C_im[m,n]
-                end
-            end
-        end
-    end
-    return st
-end
 
 function subspace_mul4x4!(st::AbstractVector{T}, comspace, U, subspace, offset=0) where T
     Base.Cartesian.@nextract 4 indices i -> comspace[i] + 1

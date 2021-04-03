@@ -7,7 +7,11 @@ using ExprTools
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, AbstractLocations, merge_locations
 using LinearAlgebra
 using LoopVectorization
+using ThreadingUtilities
 using StrideArrays
+using StrideArrays: StrideArray
+using CheapThreads: @batch
+using ArrayInterface
 
 """
     broutine!(st, op, locs[, ctrl, args...])
@@ -24,14 +28,17 @@ Qubit-based quantum circuit subroutine.
 """
 function broutine! end
 
-include("utils.jl")
-include("threading.jl")
+include("subspace/bit.jl")
+include("mul2.jl")
 
-using .Utilities
+# include("utils.jl")
+# include("threading.jl")
 
-include("codegen/utils.jl")
-include("codegen/broutine.jl")
-include("mul.jl")
-include("statevector.jl")
+# using .Utilities
+
+# include("codegen/utils.jl")
+# include("codegen/broutine.jl")
+# include("mul.jl")
+# include("statevector.jl")
 
 end
