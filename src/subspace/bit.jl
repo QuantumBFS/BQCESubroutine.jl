@@ -98,15 +98,15 @@ end
     return masks, shift_len
 end
 
-struct BitSubspace
+struct BitSubspace{L}
     n::Int # number of bits in fullspace
-    sz_subspace::Int # size of the subspace
+    sz_subspace::L # size of the subspace
     n_shifts::Int # number of shifts
     masks::Vector{Int} # shift masks
     shift_len::Vector{Int} # length of each shift
 end
 
-function Base.getindex(s::BitSubspace, i::Int)
+function Base.getindex(s::BitSubspace, i::Integer)
     index = i - 1
     @inbounds for k in 1:s.n_shifts
         index = lmove(index, s.masks[k], s.shift_len[k])
@@ -127,13 +127,15 @@ end
 function bsubspace(n::Int, locs)
     @assert issorted(locs)
     masks, shift_len = group_shift(locs)
-    BitSubspace(n, 1 << (n - length(locs)), length(masks), masks, shift_len)
+    len = 1 << (n - length(locs))
+    BitSubspace(n, StaticInt{len}(), length(masks), masks, shift_len)
 end
 
 function bcomspace(n::Int, locs)
     @assert issorted(locs)
     masks, shift_len = complement_group_shift(n, locs)
-    BitSubspace(n, 1 << length(locs), length(masks), masks, shift_len)
+    len = 1 << length(locs)
+    BitSubspace(n, StaticInt{len}(), length(masks), masks, shift_len)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", s::BitSubspace)

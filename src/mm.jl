@@ -1,4 +1,21 @@
-@inline function subspace_mul_kernel!(S::AbstractMatrix{T}, C_re, C_im, indices, U_re, U_im, k::Int, offset::Int) where T
+@inline function subspace_mul_kernel!(S::AbstractMatrix{T}, y_re, y_im, indices, U_re, U_im, k::Int, offset::Int) where T
+    @avx for i in axes(U_re, 1)
+        y_re_i = zero(T)
+        y_im_i = zero(T)
+        for j in axes(U_re, 2)
+            idx_j = indices[j] + k + offset
+            y_re_i += U_re[i, j] * S[1, idx_j] - U_im[i, j] * S[2, idx_j]
+            y_im_i += U_re[i, j] * S[2, idx_j] + U_im[i, j] * S[1, idx_j]
+        end
+        y_re[i] = y_re_i
+        y_im[i] = y_im_i
+    end
+
+    @avx for i in axes(U_re, 1)
+        idx_i = indices[i] + k + offset
+        S[1, idx_i] = y_re[i]
+        S[2, idx_i] = y_im[i]
+    end
 end
 
 @inline function subspace_mul_kernel!(S::AbstractArray{T, 3}, C_re, C_im, indices, U_re, U_im, k::Int, _b::Int, Bmax::Int, offset::Int) where T
@@ -44,18 +61,23 @@ end
     return
 end
 
+function subspace_mul_generic!(S::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
+    D = StrideArrays.static_length(indices)
+    y_re = StrideArray{T}(undef, (D, ))
+    y_im = StrideArray{T}(undef, (D, ))
+    U_re, U_im = split_op(U, indices)
+    Sr = reinterpret(reshape, T, S)
+    for k in subspace
+        subspace_mul_kernel!(Sr, y_re, y_im, indices, U_re, U_im, k, offset)
+    end
+    return S
+end
+
 function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
     C_re = StrideArray{T}(undef, (D, StaticInt{8}()))
     C_im = StrideArray{T}(undef, (D, StaticInt{8}()))
-    U_re = StrideArray{T}(undef, (D, D))
-    U_im = StrideArray{T}(undef, (D, D))
-    Ur = reinterpret(reshape, T, U)
-
-    @inbounds @simd ivdep for i in 1:length(U_re)
-        U_re[i] = Ur[2i-1]
-        U_im[i] = Ur[2i]
-    end
+    U_re, U_im = split_op(U, indices)
 
     Sr = reinterpret(reshape, T, S)
     Bmax = size(S,1)
@@ -65,11 +87,9 @@ function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix
     return S
 end
 
-struct SubspaceMulGeneric{T, D} end
+struct SubspaceMulGeneric{T, D, P} end
 
-function (k::SubspaceMulGeneric{T, D})(p::Ptr{UInt}) where {T, D}
-    P = Tuple{Ptr{T}, Ptr{T}, Ptr{T}, Ptr{Int}, Ptr{BitSubspace},
-        Tuple{Int, Int}, UnitRange{Int}, Int}
+function (k::SubspaceMulGeneric{T, D, P})(p::Ptr{UInt}) where {T, D, P}
     _, (S_ptr, U_re_ptr, U_im_ptr, indices_ptr, subspace_ptr,
             S_size, range, offset) =
         ThreadingUtilities.load(p, P, 5*sizeof(UInt))
@@ -82,6 +102,18 @@ function (k::SubspaceMulGeneric{T, D})(p::Ptr{UInt}) where {T, D}
 
     subspace_mul_generic_task!(S, indices, U_re, U_im, subspace, range, offset)
     return
+end
+
+@inline function subspace_mul_generic_task!(Sr::AbstractMatrix{T}, indices, U_re, U_im, subspace, range, offset) where T
+    D = StrideArrays.static_length(indices)
+    y_re = StrideArray{T}(undef, (D, ))
+    y_im = StrideArray{T}(undef, (D, ))
+
+    for s in range
+        k = subspace[s]
+        subspace_mul_kernel!(Sr, y_re, y_im, indices, U_re, U_im, k, offset)
+    end
+    return Sr
 end
 
 @inline function subspace_mul_generic_task!(Sr::AbstractArray{T, 3}, indices, U_re, U_im, subspace, range, offset) where T
@@ -99,13 +131,20 @@ end
     return Sr
 end
 
-function subspace_mul_generic_ptr(::AbstractMatrix{Complex{T}}, indices) where T
+function subspace_mul_generic_ptr(S::AbstractArray{Complex{T}}, indices) where T
     D = ArrayInterface.static_length(indices)
-    sig = SubspaceMulGeneric{T, D}()
+    # S_ptr, U_re_ptr, U_im_ptr, indices_ptr, subspace_ptr
+    # S_size, range, offset
+    P = Tuple{Ptr{T}, Ptr{T}, Ptr{T}, Ptr{Int}, Ptr{BitSubspace},
+        size_type(S), UnitRange{Int}, Int}
+    sig = SubspaceMulGeneric{T, D, P}()
     @cfunction($sig, Cvoid, (Ptr{UInt}, ))
 end
 
-function setup_subspace_mul_generic(p::Ptr{UInt}, S::Matrix{Complex{T}}, indices, U_re, U_im,
+size_type(::AbstractMatrix) = Tuple{Int, Int}
+size_type(::AbstractVector) = Tuple{Int}
+
+function setup_subspace_mul_generic(p::Ptr{UInt}, S::AbstractArray{Complex{T}}, indices, U_re, U_im,
         subspace_ref::Ref{BitSubspace}, range, offset::Int) where T
 
     D = StrideArrays.static_length(indices)
@@ -153,24 +192,15 @@ function div_thread(tid, len, rem)
     return f:l
 end
 
-function threaded_subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
-    D = ArrayInterface.static_length(indices)
-    U_re = StrideArray{T}(undef, (D, D))
-    U_im = StrideArray{T}(undef, (D, D))
-    @inbounds @simd ivdep for i in 1:length(U)
-        U_re[i] = real(U[i])
-        U_im[i] = imag(U[i])
-    end
+total_tasks(::AbstractVector, subspace) = length(subspace)
+total_tasks(S::AbstractMatrix, subspace) = length(subspace) * (((size(S, 1)-1)>>>3)+1)
 
-    subspace_ref = Ref(subspace)
-    Bmax = size(S, 1)
-    # evenly distribute both dimension
-    # this will provide better performance
-    # when there is a small subspace large batch
-    total = length(subspace) * (((Bmax-1)>>>3)+1)
+function threaded_subspace_mul_generic!(S::VecOrMat{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     nthreads = Threads.nthreads()
-    len, rem = divrem(total, nthreads)
+    len, rem = divrem(total_tasks(S, subspace), nthreads)
     Sr = reinterpret(reshape, T, S)
+    U_re, U_im = split_op(U, indices)
+    subspace_ref = Ref(subspace)
 
     GC.@preserve S U_re U_im subspace_ref begin
         for tid in 1:nthreads-1
@@ -186,4 +216,15 @@ function threaded_subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::Abstr
         end
     end
     return S
+end
+
+@inline function split_op(U::AbstractMatrix{Complex{T}}, indices) where T
+    D = ArrayInterface.static_length(indices)
+    U_re = StrideArray{T}(undef, (D, D))
+    U_im = StrideArray{T}(undef, (D, D))
+    @inbounds @simd ivdep for i in 1:length(U)
+        U_re[i] = real(U[i])
+        U_im[i] = imag(U[i])
+    end
+    return U_re, U_im
 end
