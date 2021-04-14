@@ -7,6 +7,8 @@ using ThreadingUtilities
 using ArrayInterface
 using BQCESubroutine: BitSubspace, bsubspace, bcomspace
 
+y_re = StrideArray{T}(undef, (StaticInt{2}(), ))
+
 function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, subspace, offset=0) where T
     Base.Cartesian.@nextract 4 indices i -> comspace[i] + 1
 
@@ -55,7 +57,7 @@ struct MyFoo
     b::Int
     c::Int
 end
-StrideArray{MyFoo}(undef, (4, 4))
+StrideArray{ComplexF64}(undef, (4, 4))
 
 ref = Ref(S)
 
@@ -65,7 +67,7 @@ S1 = BQCESubroutine.subspace_mul_generic!(copy(S), indices, U, subspace)
 S2 = BQCESubroutine.threaded_subspace_mul_generic!(copy(S), indices, U, subspace)
 S3 = subspace_mul4x4!(copy(S), comspace, U, subspace)
 
-S2 ≈ S3
+S1 ≈ S2
 @benchmark BQCESubroutine.subspace_mul_generic!($(copy(S)), indices, $U, subspace)
 @benchmark subspace_mul4x4!($(copy(S)), comspace, $U, subspace)
 @benchmark BQCESubroutine.threaded_subspace_mul_generic!($(copy(S)), indices, $U, subspace)
