@@ -87,36 +87,6 @@ function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix
     return S
 end
 
-struct SubspaceMulComplexHwReal{D, P} end
-
-function subspace_mul_generic_ptr(S::AbstractArray{Complex{T}}, indices) where {T <: Base.HWReal}
-    D = ArrayInterface.static_length(indices)
-    # S_ptr, U_re_ptr, U_im_ptr, indices_ptr, subspace_ptr
-    # S_size, range, offset
-    P = Tuple{Ptr{T}, Ptr{T}, Ptr{T}, Ptr{Int}, Ptr{BitSubspace},
-        size_type(S), UnitRange{Int}, Int}
-    sig = SubspaceMulComplexHwReal{D, P}()
-    @cfunction($sig, Cvoid, (Ptr{UInt}, ))
-end
-
-size_type(::AbstractMatrix) = Tuple{Int, Int}
-size_type(::AbstractVector) = Tuple{Int}
-
-function (k::SubspaceMulComplexHwReal{D, P})(p::Ptr{UInt}) where {D, P}
-    _, (S_ptr, U_re_ptr, U_im_ptr, indices_ptr, subspace_ptr,
-            S_size, range, offset) =
-        ThreadingUtilities.load(p, P, 5*sizeof(UInt))
-
-    S = StrideArray(PtrArray(S_ptr, (StaticInt{2}(), S_size...)))
-    U_re = StrideArray(PtrArray(U_re_ptr, (D, D)))
-    U_im = StrideArray(PtrArray(U_im_ptr, (D, D)))
-    indices = StrideArray(PtrArray(indices_ptr, (D, )))
-    subspace = ccall(:jl_value_ptr, Ref{Base.RefValue{BitSubspace}}, (Ptr{Cvoid},), subspace_ptr)[]
-
-    subspace_mul_generic_task!(S, indices, U_re, U_im, subspace, range, offset)
-    return
-end
-
 @inline function subspace_mul_generic_task!(Sr::AbstractMatrix{T}, indices, U_re, U_im, subspace, range, offset) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
     y_re = StrideArray{T}(undef, (D, ))
@@ -142,31 +112,6 @@ end
         subspace_mul_kernel!(Sr, C_re, C_im, indices, U_re, U_im, k, _b, Bmax, offset)
     end
     return Sr
-end
-
-function setup_subspace_mul_generic(p::Ptr{UInt}, S::AbstractArray{Complex{T}}, indices, U_re, U_im,
-        subspace_ref::Ref{BitSubspace}, range, offset::Int) where {T <: Base.HWReal}
-
-    D = StrideArrays.static_length(indices)
-    S_ptr = Base.unsafe_convert(Ptr{T}, S)
-    U_re_ptr = pointer(U_re)
-    U_im_ptr = pointer(U_im)
-    indices_ptr = Base.unsafe_convert(Ptr{Int}, indices)
-    subspace_ptr = Base.unsafe_convert(Ptr{BitSubspace}, subspace_ref)
-
-    fptr = subspace_mul_generic_ptr(S, indices)
-    fptr_offset = ThreadingUtilities.store!(p, fptr, sizeof(UInt))
-    content = (S_ptr, U_re_ptr, U_im_ptr, indices_ptr, subspace_ptr,
-        size(S), range, offset)
-    ThreadingUtilities.store!(p, content, fptr_offset)
-    return
-end
-
-function launch_subspace_mul_generic(tid, S, indices, U_re, U_im, subspace,
-        range, offset=0)
-
-    ThreadingUtilities.launch(setup_subspace_mul_generic, tid, S, indices, U_re,
-        U_im, subspace, range, offset)
 end
 
 function get_indices(idx, stride)
@@ -200,20 +145,10 @@ function threaded_subspace_mul_generic!(S::VecOrMat{Complex{T}}, indices, U::Abs
     len, rem = divrem(total_tasks(S, subspace), nthreads)
     Sr = reinterpret(reshape, T, S)
     U_re, U_im = split_op(U, indices)
-    subspace_ref = Ref(subspace)
 
-    GC.@preserve S U_re U_im subspace_ref begin
-        for tid in 1:nthreads-1
-            range = div_thread(tid, len, rem)
-            launch_subspace_mul_generic(tid, S, indices, U_re, U_im, subspace_ref, range, offset)
-        end
-
-        range = div_thread(nthreads, len, rem)
+    @batch for tid in 1:nthreads
+        range = div_thread(tid, len, rem)
         subspace_mul_generic_task!(Sr, indices, U_re, U_im, subspace, range, offset)
-
-        for tid in 1:nthreads-1
-            ThreadingUtilities.wait(tid)
-        end
     end
     return S
 end

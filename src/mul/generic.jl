@@ -84,46 +84,6 @@ function subspace_mul_generic!(S::AbstractMatrix{T}, indices, U::AbstractMatrix,
     return S
 end
 
-################
-# multhreading
-################
-# struct SubspaceMulGeneric{P} end
-
-# @generated function subspace_mul_generic_ptr(::AbstractArray{T, N}, indices, subspace) where {T, N}
-#     # S_ptr, U_ptr, indices_ptr, subspace_ptr
-#     # S_size, range, offset
-#     P = Tuple{Ptr{T}, Ptr{T}, Ptr{Int}, Ptr{subspace},
-#         NTuple{N, Int}, UnitRange{Int}, Int}
-#     sig = SubspaceMulGeneric{P}()
-#     :(@cfunction($sig, Cvoid, (Ptr{UInt}, )))
-# end
-
-# function (k::SubspaceMulGeneric{P})(p::Ptr{UInt}) where {P}
-#     _, (S_ptr, U_ptr, indices_ptr, subspace_ptr,
-#             S_size, range, offset) =
-#         ThreadingUtilities.load(p, P, 5*sizeof(UInt))
-
-#     S = PtrArray(S_ptr, S_size)
-#     U_re = StrideArray(PtrArray(U_re_ptr, (D, D)))
-#     U_im = StrideArray(PtrArray(U_im_ptr, (D, D)))
-#     indices = StrideArray(PtrArray(indices_ptr, (D, )))
-#     subspace = ccall(:jl_value_ptr, Ref{Base.RefValue{BitSubspace}}, (Ptr{Cvoid},), subspace_ptr)[]
-
-#     subspace_mul_generic_task!(S, indices, U_re, U_im, subspace, range, offset)
-#     return
-# end
-
-
-# function subspace_mul_generic_ptr(S::AbstractArray{T}, indices) where {T}
-#     D = ArrayInterface.static_length(indices)
-#     # S_ptr, U_ptr, indices_ptr, subspace_ptr
-#     # S_size, range, offset
-#     P = Tuple{Ptr{T}, Ptr{T}, Ptr{Int}, Ptr{BitSubspace},
-#         size_type(S), UnitRange{Int}, Int}
-#     sig = SubspaceMulGeneric{D, P}()
-#     @cfunction($sig, Cvoid, (Ptr{UInt}, ))
-# end
-
 @inline function subspace_mul_generic_task!(S::AbstractVector{T}, indices, U, subspace, range, offset) where {T}
     y = similar(st, (size(U, 1), ))
 
