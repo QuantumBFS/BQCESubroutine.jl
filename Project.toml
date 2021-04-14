@@ -1,7 +1,7 @@
 name = "BQCESubroutine"
 uuid = "29e2bfda-5ba7-471c-9125-afac425f1f80"
 authors = ["Roger-Luo <rogerluo.rl18@gmail.com> and contributors"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 ArrayInterface = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
@@ -15,6 +15,16 @@ StrideArrays = "d1fa6d79-ef01-42a6-86c9-f7c551f8593b"
 ThreadingUtilities = "8290d209-cae3-49c0-8002-c8c24d57dab5"
 VectorizationBase = "3d5dd08c-fd9d-11e8-17fa-ed2836048c2f"
 YaoLocations = "66df03fb-d475-48f7-b449-3d9064bf085b"
+
+[compat]
+julia = "1.6"
+ExprTools = "0.1"
+LoopVectorization = "0.12"
+MLStyle = "0.4"
+OrderedCollections = "1.4"
+StrideArrays = "0.1"
+VectorizationBase = "0.19"
+YaoLocations = "0.1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
