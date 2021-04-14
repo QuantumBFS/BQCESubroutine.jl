@@ -1,6 +1,3 @@
-@inline function subspace_mul_kernel!(S::AbstractMatrix{T}, C_re, C_im, indices, U_re, U_im, k::Int, offset::Int) where T
-end
-
 @inline function subspace_mul_kernel!(S::AbstractArray{T, 3}, C_re, C_im, indices, U_re, U_im, k::Int, _b::Int, Bmax::Int, offset::Int) where T
     b = _b << 3;
     bmax = b + 8

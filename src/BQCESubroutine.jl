@@ -29,8 +29,7 @@ Qubit-based quantum circuit subroutine.
 function broutine! end
 
 include("subspace/bit.jl")
-include("mul/generic.jl")
-include("mul/complex.jl")
+include("mul2.jl")
 
 # include("utils.jl")
 # include("threading.jl")
