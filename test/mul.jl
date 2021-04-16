@@ -5,9 +5,9 @@ using StrideArrays
 using LoopVectorization
 using ThreadingUtilities
 using ArrayInterface
+using CheapThreads
 using BQCESubroutine: BitSubspace, bsubspace, bcomspace
 
-y_re = StrideArray{T}(undef, (StaticInt{2}(), ))
 
 function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, subspace, offset=0) where T
     Base.Cartesian.@nextract 4 indices i -> comspace[i] + 1
@@ -16,7 +16,7 @@ function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, su
         Base.Cartesian.@nextract 4 U_i j->U[i, j]
     end
     
-    @inbounds Threads.@threads for k in subspace
+    @inbounds for k in subspace
         Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
 
         for b in 1:size(st, 1)
@@ -35,6 +35,58 @@ function subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, su
     return st
 end
 
+@inline function subspace_mul4x4_task!(st::AbstractMatrix{T}, indices, U, subspace, range, offset) where T
+    D = StrideArrays.static_length(indices)
+    y = StrideArray{T}(undef, (D, ))
+
+    @inbounds begin
+        Base.Cartesian.@nexprs 4 i -> begin
+            indices_i = indices[i]
+        end
+
+        Base.Cartesian.@nexprs 4 i -> begin
+            Base.Cartesian.@nexprs 4 j -> begin
+                U_i_j = U[i][j]
+            end
+        end
+    end
+
+    @inbounds for (s, b) in range
+        k = subspace[s]
+        Base.Cartesian.@nextract 4 idx i-> k + indices_i + offset
+
+        Base.Cartesian.@nexprs 4 i -> begin
+            y[i] = zero(T)
+            Base.Cartesian.@nexprs 4 j -> begin
+                y[i] += U_i_j * st[b, idx_j]
+            end
+        end
+
+        Base.Cartesian.@nexprs 4 i -> begin
+            st[b, idx_i] = y[i]
+        end
+    end
+    return
+end
+
+function threaded_subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractMatrix, subspace, offset=0) where T    
+    space = BQCESubroutine.CartesianSpace(1:length(subspace), 1:size(st, 1))
+    nthreads = Threads.nthreads()
+    U = (U[1, 1], U[1, 2], U[1, 3], U[1, 4]),
+        (U[2, 1], U[2, 2], U[2, 3], U[2, 4]),
+        (U[3, 1], U[3, 2], U[3, 3], U[3, 4]),
+        (U[4, 1], U[4, 2], U[4, 3], U[4, 4])
+
+    Base.Cartesian.@nextract 4 indices i -> comspace[i] + 1
+    indices = (indices_1, indices_2, indices_3, indices_4)
+
+    @batch for tid in 1:nthreads
+        range = BQCESubroutine.schedule_task(space, tid, nthreads)
+        subspace_mul4x4_task!(st, indices, U, subspace, range, offset)
+    end
+    return st
+end
+
 
 T = Float64
 n = 10
@@ -44,33 +96,24 @@ locs = Locations((1, 3))
 
 subspace = bsubspace(n, locs)
 comspace = bcomspace(n, locs)
-indices = StrideArray{Int}(undef, (length(comspace), ))
-@simd ivdep for i in eachindex(indices)
-    indices[i] = comspace[i] + 1
+inds = StrideArray{Int}(undef, (length(comspace), ))
+@simd ivdep for i in eachindex(inds)
+    inds[i] = comspace[i] + 1
 end
 
-using SparseArrays
-S = sprand(1000, 1000, 0.001)
-isbitstype(BigFloat)
-struct MyFoo
-    a::Int
-    b::Int
-    c::Int
-end
-StrideArray{ComplexF64}(undef, (4, 4))
-
-ref = Ref(S)
-
-Base.unsafe_load(Ptr{typeof(S)}, ref)
-
-S1 = BQCESubroutine.subspace_mul_generic!(copy(S), indices, U, subspace)
-S2 = BQCESubroutine.threaded_subspace_mul_generic!(copy(S), indices, U, subspace)
+S1 = BQCESubroutine.subspace_mul_generic!(copy(S), inds, U, subspace);
+S2 = BQCESubroutine.threaded_subspace_mul_generic!(copy(S), inds, U, subspace)
 S3 = subspace_mul4x4!(copy(S), comspace, U, subspace)
+S4 = threaded_subspace_mul4x4!(copy(S), comspace, U, subspace)
 
 S1 ≈ S2
-@benchmark BQCESubroutine.subspace_mul_generic!($(copy(S)), indices, $U, subspace)
+S1 ≈ S3
+S1 ≈ S4
+
+@benchmark BQCESubroutine.subspace_mul_generic!($(copy(S)), inds, $U, subspace)
 @benchmark subspace_mul4x4!($(copy(S)), comspace, $U, subspace)
-@benchmark BQCESubroutine.threaded_subspace_mul_generic!($(copy(S)), indices, $U, subspace)
+@benchmark BQCESubroutine.threaded_subspace_mul_generic!($(copy(S)), inds, $U, subspace)
+@benchmark threaded_subspace_mul4x4!($(copy(S)), comspace, $U, subspace)
 
 n = 15
 S = rand(ComplexF64, 1<<n);

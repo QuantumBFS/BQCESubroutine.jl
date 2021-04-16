@@ -7,6 +7,7 @@ version = "0.1.1"
 ArrayInterface = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
 CheapThreads = "b630d9fa-e28e-4980-896d-83ce5e2106b2"
 ExprTools = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
+Expronicon = "6b7a57c9-7cc1-4fdf-b7f5-e857abae3636"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
@@ -17,7 +18,6 @@ VectorizationBase = "3d5dd08c-fd9d-11e8-17fa-ed2836048c2f"
 YaoLocations = "66df03fb-d475-48f7-b449-3d9064bf085b"
 
 [compat]
-julia = "1.6"
 ExprTools = "0.1"
 LoopVectorization = "0.12"
 MLStyle = "0.4"
@@ -25,6 +25,7 @@ OrderedCollections = "1.4"
 StrideArrays = "0.1"
 VectorizationBase = "0.19"
 YaoLocations = "0.1"
+julia = "1.6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
