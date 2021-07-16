@@ -9,7 +9,7 @@ function subspace_mul!(st::AbstractVector{T}, comspace, U, subspace, offset=0) w
         return subspace_mul8x8!(st, comspace, U, subspace, offset)
     else
         # force compiler to specialize on comspace size
-        indices = StrideArray{Int}(undef, (StaticInt{length(comspace)}(), ))
+        indices = StrideArray{Int}(undef, (length(comspace), ))
         @simd ivdep for i in eachindex(indices)
             indices[i] = comspace[i] + 1
         end
@@ -30,6 +30,10 @@ function subspace_mul!(st::AbstractMatrix, comspace, U::AbstractMatrix{T}, subsp
         return subspace_mul_generic!(st, indices, U, subspace, offset)
     end
 end
+
+# function subspace_mul!(st::AbstractVector{T}, comspace, U::Diagonal{N, Vector{N}}, subspace, offset=0) where {T, N}
+#     return subspace_mul_generic!(st, indices, U, subspace, offset)
+# end
 
 # NOTE:
 # expanded kernel is slower than avx kernel in multithreading

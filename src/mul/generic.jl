@@ -68,6 +68,22 @@ function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix
     return S
 end
 
+function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Diagonal{N, Vector{N}}, subspace, offset = 0) where {T, N}
+    # println("Diagonal used")
+    D = StrideArrays.static_length(indices)
+    y = StrideArray{T}(undef, (D, ))
+    if D == 4
+        for k in subspace
+            subspace_mul_kernel_diagonal_4x4!(S, y, indices, U, k, offset)
+        end
+    else
+        for k in subspace
+            subspace_mul_kernel_diagonal!(S, y, indices, U, k, offset)
+        end
+    end
+    return S
+end
+
 function threaded_subspace_mul_generic!(S::AbstractVecOrMat, indices, U::AbstractMatrix, subspace, offset=0)
     nthreads = Threads.nthreads()
     space = CartesianSpace(S, subspace)
