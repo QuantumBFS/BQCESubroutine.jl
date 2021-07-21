@@ -1,33 +1,4 @@
 # level 1 - generic routines
-function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations)
-    size(U, 1) == 2 && return broutine2x2!(st, U, locs)
-    # NOTE: this is a very small overhead, and is very likely
-    # to get optimized, we will always check these for the
-    # sake of correctness.
-    @assert log2dim(U) == length(locs) "operator dimension mismatch locs"
-    n = log2dim(st)
-    @assert n >= maximum(plain(locs)) "locs is too large"
-    subspace = bsubspace(n, locs)
-    comspace = bcomspace(n, locs)
-    subspace_mul!(st, comspace, U, subspace)
-    return st
-end
-
-function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
-    size(U, 1) == 2 && return broutine2x2!(st, U, locs, ctrl)
-    @assert log2dim(U) == length(locs) "operator dimension mismatch locs"
-    n = log2dim(st)
-    @assert n >= maximum(plain(locs)) "locs is too large"
-    @assert isempty(intersect(locs, ctrl.storage)) "locs is overlapping with ctrl"
-    # NOTE: this only adds a small constant overhead anyway
-    # TODO: use StrideArray to optimize this away since its
-    # stack allocated.
-    subspace = bsubspace(n, sort(merge_locations(locs, ctrl.storage)))
-    comspace = bcomspace(n, locs)
-    subspace_mul!(st, comspace, U, subspace, ctrl_offset(ctrl))
-    return st
-end
-
 
 function broutine2x2!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations)
     U11 = U[1, 1]; U12 = U[1, 2];
@@ -251,17 +222,6 @@ def_broutine2x2_ctrl_m = Dict{Symbol, Any}(
 @eval $(combinedef(def_broutine2x2_m))
 @eval $(combinedef(def_broutine2x2_ctrl))
 @eval $(combinedef(def_broutine2x2_ctrl_m))
-
-function ctrl_offset(ctrl::CtrlLocations)
-    locs = plain(ctrl)
-    mask = 0
-    for i in 1:length(ctrl)
-        if ctrl.flags[i]
-            mask += (1 << (locs[i] - 1))
-        end
-    end
-    return mask
-end
 
 function broutine2x2!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
     U11 = U[1, 1]; U12 = U[1, 2];

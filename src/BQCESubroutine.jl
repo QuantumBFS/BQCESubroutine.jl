@@ -2,7 +2,9 @@ module BQCESubroutine
 
 export broutine!, @broutine, log2dim, log2i
 
-using MLStyle, Expronicon, ExprTools
+using MLStyle
+using Expronicon
+using ExprTools
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, AbstractLocations, merge_locations
 using LinearAlgebra
 using LoopVectorization
@@ -16,7 +18,7 @@ include("schedule.jl")
 include("subspace/bit.jl")
 include("mul/mul.jl")
 include("routine/bit.jl")
-# include("threading.jl")
+include("threading.jl")
 
 # include("utils.jl")
 # using .Utilities
