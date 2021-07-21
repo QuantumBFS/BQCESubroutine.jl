@@ -9,7 +9,7 @@ function subspace_mul!(st::AbstractVector{T}, comspace, U, subspace, offset=0) w
         return subspace_mul8x8!(st, comspace, U, subspace, offset)
     else
         # force compiler to specialize on comspace size
-        indices = StrideArray{Int}(undef, (StaticInt{length(comspace)}(), ))
+        indices = StrideArray{Int}(undef, (length(comspace), ))
         @simd ivdep for i in eachindex(indices)
             indices[i] = comspace[i] + 1
         end
@@ -35,7 +35,7 @@ end
 # expanded kernel is slower than avx kernel in multithreading
 # thus we don't need to do any manual loop unroll.
 function threaded_subspace_mul!(S::AbstractVecOrMat, comspace, U, subspace, offset=0)
-    indices = StrideArray{Int}(undef, (StaticInt{length(comspace)}(), ))
+    indices = StrideArray{Int}(undef, (length(comspace), ))
     @simd ivdep for i in eachindex(indices)
         indices[i] = comspace[i] + 1
     end
