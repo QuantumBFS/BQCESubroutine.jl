@@ -1,9 +1,9 @@
 using Test
 using LinearAlgebra
 using BQCESubroutine
-using BQCESubroutine.Utilities
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
-using BQCESubroutine: ctrl_offset
+using BQCESubroutine: ctrl_offset, bcomspace, bsubspace, broutine2x2!, broutine!
+using ThreadingUtilities
 
 function naive_broutine!(st::AbstractVector, U, locs)
     n = log2dim(st)
