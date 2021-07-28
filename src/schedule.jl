@@ -60,6 +60,18 @@ function schedule_task(s::CartesianSpace, tid::Int, nthreads::Int)
     return CartesianPartition(s, f, l)
 end
 
+# NOTE:
+# The following is a ~5% slower alternative to schedule_task.
+# Not strictly equivalent, e.g., for length(s)=100, nthreads=7,
+# schedule_task gives (15, 15, 14, 14, 14, 14, 14),
+# but schedule_task_2 gives (14, 14, 14, 15, 14, 14, 15).
+#
+# function schedule_task_2(s::CartesianSpace, tid::Int, nthreads::Int)
+#     return CartesianPartition(s, 
+#         length(s) * (tid-1) ÷ nthreads + 1,
+#         length(s) * tid ÷ nthreads)
+# end
+
 Base.length(it::CartesianPartition) = it.to - it.from + 1
 Base.eltype(it::CartesianPartition) = eltype(it.space)
 Base.getindex(it::CartesianPartition, idx::Int) = it.space[idx]
