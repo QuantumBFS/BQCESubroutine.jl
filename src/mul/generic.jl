@@ -4,6 +4,10 @@ function subspace_mul_generic!(S::AbstractVector{T}, indices, U::AbstractMatrix,
     D = StrideArrays.static_length(indices)
     y = StrideArray{T}(undef, (D, ))
     if D == 4
+        # TODO:
+        # this "if" branch is pre-empted by "if size(U, 1) == 4" in subspace_mul!
+        # making subspace_mul_kernel_generic_4x4! redundant
+        # Should we keep subspace_mul4x4! or subspace_mul_kernel_generic_4x4! ?
         for k in subspace
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, offset)
         end
