@@ -2,7 +2,7 @@ using Test
 using LoopVectorization
 using LinearAlgebra
 using BQCESubroutine
-using CheapThreads
+#using CheapThreads
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
 using BQCESubroutine: ctrl_offset, bcomspace, bsubspace, broutine!, log2dim
 using ThreadingUtilities
