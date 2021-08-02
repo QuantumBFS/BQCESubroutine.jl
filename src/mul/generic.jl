@@ -48,9 +48,24 @@ end
     return U_re, U_im
 end
 
+@inline function split_op(U::Diagonal{Complex{T}, Vector{Complex{T}}}, indices) where {T <: Real}
+    #println("split_op (diagonal)")
+
+    # D = ArrayInterface.static_length(indices)
+    # U_re = StrideArray{T}(undef, (D, ))
+    # U_im = StrideArray{T}(undef, (D, ))
+    # @inbounds @simd ivdep for i in 1:length(U)
+    #     U_re[i] = real(U[i, i])
+    #     U_im[i] = imag(U[i, i])
+    # end
+    # return U_re, U_im
+
+    return real(U), imag(U)
+end
+
 function subspace_mul_generic!(S::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
-    y = (StrideArray{T}(undef, (D, )), StrideArray{T}(undef, (D, )))
+    y = U isa Diagonal ? (nothing, nothing) : (StrideArray{T}(undef, (D, )), StrideArray{T}(undef, (D, )))
     U = split_op(U, indices)
     Sr = reinterpret(reshape, T, S)
     for k in subspace
@@ -61,7 +76,7 @@ end
 
 function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
-    C = (StrideArray{T}(undef, (D, StaticInt{8}())), StrideArray{T}(undef, (D, StaticInt{8}())))
+    C = U isa Diagonal ? (nothing, nothing) : (StrideArray{T}(undef, (D, StaticInt{8}())), StrideArray{T}(undef, (D, StaticInt{8}())))
     U = split_op(U, indices)
 
     Sr = reinterpret(reshape, T, S)
