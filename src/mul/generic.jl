@@ -2,7 +2,7 @@
 # generic methods
 function subspace_mul_generic!(S::AbstractVector{T}, indices, U::AbstractMatrix, subspace, offset=0) where {T}
     D = StrideArrays.static_length(indices)
-    y = StrideArray{T}(undef, (D, ))
+    y = U isa Diagonal ? nothing : StrideArray{T}(undef, (D, ))
     if D == 4
         # TODO:
         # this "if" branch is pre-empted by "if size(U, 1) == 4" in subspace_mul!
@@ -21,7 +21,7 @@ end
 
 function subspace_mul_generic!(S::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, offset=0) where {T}
     D = StrideArrays.static_length(indices)
-    y = StrideArray{T}(undef, (D, ))
+    y = U isa Diagonal ? nothing : StrideArray{T}(undef, (D, ))
     if D == 4
         for k in subspace, b in axes(S, 1)
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, b, offset)
@@ -72,19 +72,22 @@ function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix
     return S
 end
 
-function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Diagonal{N, Vector{N}}, subspace, offset = 0) where {T, N}
-    D = StrideArrays.static_length(indices)
-    if D == 4
-        for k in subspace
-            subspace_mul_kernel_diagonal_4x4!(S, indices, U, k, offset)
-        end
-    else
-        for k in subspace
-            subspace_mul_kernel_diagonal!(S, indices, U, k, offset)
-        end
-    end
-    return S
-end
+# NOTE:
+# to reduce repetitive code, we should specialize for Diagonal at "kernel" level
+#
+# function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Diagonal{N, Vector{N}}, subspace, offset = 0) where {T, N}
+#     D = StrideArrays.static_length(indices)
+#     if D == 4
+#         for k in subspace
+#             subspace_mul_kernel_diagonal_4x4!(S, indices, U, k, offset)
+#         end
+#     else
+#         for k in subspace
+#             subspace_mul_kernel_diagonal!(S, indices, U, k, offset)
+#         end
+#     end
+#     return S
+# end
 
 function threaded_subspace_mul_generic!(S::AbstractVecOrMat, indices, U::AbstractMatrix, subspace, offset=0)
     nthreads = Threads.nthreads()

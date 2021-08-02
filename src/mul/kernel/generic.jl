@@ -1,3 +1,7 @@
+"""
+k: an index from subspace
+indices: array of indices from comspace
+"""
 @inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U, k::Int, offset::Int) where T
     @inbounds for i in axes(U, 1)
         y[i] = zero(T)
@@ -26,6 +30,16 @@ end
     @inbounds for i in axes(U, 1)
         idx_i = k + indices[i] + offset
         S[b, idx_i] = y[i]
+    end
+    return
+end
+
+# specialize for Diagonal
+@inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U::Diagonal{N, Vector{N}}, k::Int, offset::Int) where {T, N}
+    #println("diagonal (subspace_mul_kernel_generic!)")
+    @inbounds for i in axes(U, 1)
+        idx_i = k + indices[i] + offset
+        S[idx_i] = U[i, i] * S[idx_i]
     end
     return
 end
