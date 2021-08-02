@@ -15,7 +15,7 @@ U = Diagonal(rand(Float64, 1<<M))
 U_dense = Matrix(U)
 locs = Locations(1:M)
 
-@benchmark st1 = broutine!(copy(st), U, locs)
-@benchmark st2 = broutine!(copy(st), U_dense, locs)
+st1 = broutine!(copy(st), U, locs)          # @benchmark
+st2 = broutine!(copy(st), U_dense, locs)    # @benchmark
 
 @test st1 ≈ st2
