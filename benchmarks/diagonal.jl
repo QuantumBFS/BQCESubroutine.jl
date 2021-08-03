@@ -4,7 +4,7 @@ using LinearAlgebra
 using BQCESubroutine
 using YaoLocations
 
-# TODO: complex + diagonal ?
+# TODO: threaded_subspace_mul_generic!
 # TODO: check if (dense) Matrix is diagonal?
 
 N = 15
@@ -37,7 +37,7 @@ end
     st2 = broutine!(copy(st), U_dense, locs)    # @benchmark
     @test st1 ≈ st2
 
-    # st1 = broutine!(copy(st_mat), U, locs)          # @benchmark
-    # st2 = broutine!(copy(st_mat), U_dense, locs)    # @benchmark
-    # @test st1 ≈ st2
+    st1 = broutine!(copy(st_mat), U, locs)          # @benchmark
+    st2 = broutine!(copy(st_mat), U_dense, locs)    # @benchmark
+    @test st1 ≈ st2
 end
