@@ -21,7 +21,9 @@
 end
 
 # Diagonal real U
-@inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices, U::Diagonal, k::Int, offset::Int) where {T <: Base.HWReal}
+@inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices,
+    U::Diagonal{<:Real}, k::Int, offset::Int) where {T <: Base.HWReal}
+
     @avx for i in axes(U, 1)
         idx_i = indices[i] + k + offset
         S[1, idx_i] = U[i, i] * S[1, idx_i]
@@ -50,16 +52,15 @@ end
     end
 end
 
-# Diagonal complex U
+# Diagonal complex U (not split up by split_op)
 @inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices,
-    (U_re, U_im)::Tuple{Diagonal, Diagonal}, k::Int, offset::Int) where {T <: Base.HWReal}
+    U::Diagonal{<:Complex}, k::Int, offset::Int) where {T <: Base.HWReal}
 
-    #println("Diagonal complex U")
-    @avx for i in axes(U_re, 1)
+    @avx for i in axes(U, 1)
         idx_i = indices[i] + k + offset
         S[1, idx_i], S[2, idx_i] =
-            U_re[i, i] * S[1, idx_i] - U_im[i, i] * S[2, idx_i],
-            U_re[i, i] * S[2, idx_i] + U_im[i, i] * S[1, idx_i]
+            real(U[i, i]) * S[1, idx_i] - imag(U[i, i]) * S[2, idx_i],
+            real(U[i, i]) * S[2, idx_i] + imag(U[i, i]) * S[1, idx_i]
     end
 end
 

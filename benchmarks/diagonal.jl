@@ -37,7 +37,7 @@ end
     st2 = broutine!(copy(st), U_dense, locs)    # @benchmark
     @test st1 ≈ st2
 
-    st1 = broutine!(copy(st_mat), U, locs)          # @benchmark
-    st2 = broutine!(copy(st_mat), U_dense, locs)    # @benchmark
-    @test st1 ≈ st2
+    # st1 = broutine!(copy(st_mat), U, locs)          # @benchmark
+    # st2 = broutine!(copy(st_mat), U_dense, locs)    # @benchmark
+    # @test st1 ≈ st2
 end

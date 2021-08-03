@@ -37,6 +37,12 @@ end
 # specialization on Complex{<:Base.HWReal}
 @inline split_op(U::AbstractMatrix{<:Real}, indices) = U
 
+# NOTE:
+# Each element of the complex Diagonal matrix U is used only once in the kernel.
+# Therefore, in order to avoid unnecessary memory allocations,
+# we do not split U into two (1-dimensional) StrideArrays.
+@inline split_op(U::Diagonal{<:Complex}, indices) = U
+
 @inline function split_op(U::AbstractMatrix{Complex{T}}, indices) where {T <: Real}
     D = ArrayInterface.static_length(indices)
     U_re = StrideArray{T}(undef, (D, D))
@@ -46,21 +52,6 @@ end
         U_im[i] = imag(U[i])
     end
     return U_re, U_im
-end
-
-@inline function split_op(U::Diagonal{Complex{T}, Vector{Complex{T}}}, indices) where {T <: Real}
-    #println("split_op (diagonal)")
-
-    # D = ArrayInterface.static_length(indices)
-    # U_re = StrideArray{T}(undef, (D, ))
-    # U_im = StrideArray{T}(undef, (D, ))
-    # @inbounds @simd ivdep for i in 1:length(U)
-    #     U_re[i] = real(U[i, i])
-    #     U_im[i] = imag(U[i, i])
-    # end
-    # return U_re, U_im
-
-    return real(U), imag(U)
 end
 
 function subspace_mul_generic!(S::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}

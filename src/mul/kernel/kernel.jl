@@ -1,3 +1,3 @@
 include("generic.jl")
 include("complex.jl")
-include("diagonal.jl")
+#include("diagonal.jl")
