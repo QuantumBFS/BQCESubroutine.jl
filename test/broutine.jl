@@ -162,10 +162,10 @@ end
 end
 
 @testset "diagonal" begin
-    #@testset "dtype=$(dtype), size(st)=$(size(st))" for dtype in [Float64, ComplexF64], st in [rand(dtype, 1 << N), rand(dtype, 5, 1 << N)]
-    @testset "dtype=$(dtype), size(st)=$(size(st))" for dtype in [Float64], st in [rand(dtype, 1 << N), rand(dtype, 5, 1 << N)]
-        @testset "$(1<<M) x $(1<<M)" for M in [1,2,3,4]
-            U = Diagonal(rand(dtype, 1<<M))
+    @testset "dtype_st=$(dtype_st), size(st)=$(size(st))" for dtype_st in [Float64, ComplexF64], st in [rand(dtype_st, 1 << N), rand(dtype_st, 5, 1 << N)]
+        @testset "dtype_U=$(dtype_U), $(1<<M) x $(1<<M)" for dtype_U in [Float64, ComplexF64], M in [1,2,3,4]
+            dtype_st == Float64 && dtype_U == ComplexF64 && break
+            U = Diagonal(rand(dtype_U, 1<<M))
             U_dense = Matrix(U)
             @testset "i=$i" for i in 1:N
                 locs = Locations([mod1(i+k, N) for k in 0:M-1])
