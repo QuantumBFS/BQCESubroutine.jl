@@ -5,7 +5,7 @@ using StrideArrays
 using LoopVectorization
 using ThreadingUtilities
 using ArrayInterface
-using CheapThreads
+#using CheapThreads      # @batch is not working properly. see https://github.com/JuliaSIMD/Polyester.jl/issues/32
 using BQCESubroutine: BitSubspace, bsubspace, bcomspace
 
 
@@ -80,7 +80,8 @@ function threaded_subspace_mul4x4!(st::AbstractMatrix{T}, comspace, U::AbstractM
     Base.Cartesian.@nextract 4 indices i -> comspace[i] + 1
     indices = (indices_1, indices_2, indices_3, indices_4)
 
-    @batch for tid in 1:nthreads
+    #@batch for tid in 1:nthreads
+    for tid in 1:nthreads
         range = BQCESubroutine.schedule_task(space, tid, nthreads)
         subspace_mul4x4_task!(st, indices, U, subspace, range, offset)
     end

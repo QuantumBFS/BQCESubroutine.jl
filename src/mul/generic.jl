@@ -2,8 +2,12 @@
 # generic methods
 function subspace_mul_generic!(S::AbstractVector{T}, indices, U::AbstractMatrix, subspace, offset=0) where {T}
     D = StrideArrays.static_length(indices)
-    y = StrideArray{T}(undef, (D, ))
+    y = U isa Diagonal ? nothing : StrideArray{T}(undef, (D, ))
     if D == 4
+        # TODO:
+        # this "if" branch is pre-empted by "if size(U, 1) == 4" in subspace_mul!
+        # making subspace_mul_kernel_generic_4x4! redundant
+        # Should we keep subspace_mul4x4! or subspace_mul_kernel_generic_4x4! ?
         for k in subspace
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, offset)
         end
@@ -17,7 +21,7 @@ end
 
 function subspace_mul_generic!(S::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, offset=0) where {T}
     D = StrideArrays.static_length(indices)
-    y = StrideArray{T}(undef, (D, ))
+    y = U isa Diagonal ? nothing : StrideArray{T}(undef, (D, ))
     if D == 4
         for k in subspace, b in axes(S, 1)
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, b, offset)
@@ -33,6 +37,12 @@ end
 # specialization on Complex{<:Base.HWReal}
 @inline split_op(U::AbstractMatrix{<:Real}, indices) = U
 
+# NOTE:
+# Each element of the complex Diagonal matrix U is used only once in the kernel.
+# Therefore, in order to avoid unnecessary memory allocations,
+# we do not split U into two (1-dimensional) StrideArrays.
+@inline split_op(U::Diagonal{<:Complex}, indices) = U
+
 @inline function split_op(U::AbstractMatrix{Complex{T}}, indices) where {T <: Real}
     D = ArrayInterface.static_length(indices)
     U_re = StrideArray{T}(undef, (D, D))
@@ -46,7 +56,7 @@ end
 
 function subspace_mul_generic!(S::Vector{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
-    y = (StrideArray{T}(undef, (D, )), StrideArray{T}(undef, (D, )))
+    y = U isa Diagonal ? (nothing, nothing) : (StrideArray{T}(undef, (D, )), StrideArray{T}(undef, (D, )))
     U = split_op(U, indices)
     Sr = reinterpret(reshape, T, S)
     for k in subspace
@@ -57,7 +67,7 @@ end
 
 function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix, subspace, offset=0) where {T <: Base.HWReal}
     D = StrideArrays.static_length(indices)
-    C = (StrideArray{T}(undef, (D, StaticInt{8}())), StrideArray{T}(undef, (D, StaticInt{8}())))
+    C = U isa Diagonal ? (nothing, nothing) : (StrideArray{T}(undef, (D, StaticInt{8}())), StrideArray{T}(undef, (D, StaticInt{8}())))
     U = split_op(U, indices)
 
     Sr = reinterpret(reshape, T, S)
@@ -67,6 +77,23 @@ function subspace_mul_generic!(S::Matrix{Complex{T}}, indices, U::AbstractMatrix
     end
     return S
 end
+
+# NOTE:
+# to reduce repetitive code, we should specialize for Diagonal at "kernel" level
+#
+# function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Diagonal{N, Vector{N}}, subspace, offset = 0) where {T, N}
+#     D = StrideArrays.static_length(indices)
+#     if D == 4
+#         for k in subspace
+#             subspace_mul_kernel_diagonal_4x4!(S, indices, U, k, offset)
+#         end
+#     else
+#         for k in subspace
+#             subspace_mul_kernel_diagonal!(S, indices, U, k, offset)
+#         end
+#     end
+#     return S
+# end
 
 function threaded_subspace_mul_generic!(S::AbstractVecOrMat, indices, U::AbstractMatrix, subspace, offset=0)
     nthreads = Threads.nthreads()

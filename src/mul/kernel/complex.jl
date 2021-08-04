@@ -1,5 +1,5 @@
 
-
+# real U
 @inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices, U::AbstractMatrix{T}, k::Int, offset::Int) where {T <: Base.HWReal}
     @avx for i in axes(U, 1)
         y_re_i = zero(T)
@@ -20,6 +20,18 @@
     end
 end
 
+# Diagonal real U
+@inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices,
+    U::Diagonal{T}, k::Int, offset::Int) where {T <: Base.HWReal}
+
+    @avx for i in axes(U, 1)
+        idx_i = indices[i] + k + offset
+        S[1, idx_i] = U[i, i] * S[1, idx_i]
+        S[2, idx_i] = U[i, i] * S[2, idx_i]
+    end
+end
+
+# complex U
 @inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices, (U_re, U_im), k::Int, offset::Int) where {T <: Base.HWReal}
     @avx for i in axes(U_re, 1)
         y_re_i = zero(T)
@@ -40,6 +52,19 @@ end
     end
 end
 
+# Diagonal complex U (not split up by split_op)
+@inline function subspace_mul_kernel_complex!(S::AbstractMatrix{T}, (y_re, y_im), indices,
+    U::Diagonal{Complex{T}}, k::Int, offset::Int) where {T <: Base.HWReal}
+
+    @avx for i in axes(U, 1)
+        idx_i = indices[i] + k + offset
+        S[1, idx_i], S[2, idx_i] =
+            real(U[i, i]) * S[1, idx_i] - imag(U[i, i]) * S[2, idx_i],
+            real(U[i, i]) * S[2, idx_i] + imag(U[i, i]) * S[1, idx_i]
+    end
+end
+
+# real U, multiple states in S
 @inline function subspace_mul_kernel_complex!(S::AbstractArray{T, 3}, (C_re, C_im), indices, U::AbstractMatrix{T}, k::Int, _b::Int, Bmax::Int, offset::Int) where {T <: Base.HWReal}
     b = _b << 3;
     bmax = b + 8
@@ -83,6 +108,31 @@ end
     return
 end
 
+# Diagonal real U, multiple states in S
+@inline function subspace_mul_kernel_complex!(S::AbstractArray{T, 3}, (C_re, C_im), indices,
+    U::Diagonal{T}, k::Int, _b::Int, Bmax::Int, offset::Int) where {T <: Base.HWReal}
+
+    b = _b << 3;
+    bmax = b + 8
+    if bmax ≤ Bmax # full static block
+        @avx for n ∈ 1:8, m ∈ axes(U, 1)
+            S_m = k + indices[m] + offset
+            S[1, n+b, S_m] = U[m, m] * S[1, n+b, S_m]
+            S[2, n+b, S_m] = U[m, m] * S[2, n+b, S_m]
+        end
+        # AmulB!(C_re, C_im, U, U_im, 
+    else # dynamic block
+        Nmax = 8 + Bmax - bmax
+        @avx for n ∈ 1:Nmax, m ∈ axes(U, 1)
+            S_m = k + indices[m] + offset
+            S[1, n+b, S_m] = U[m, m] * S[1, n+b, S_m]
+            S[2, n+b, S_m] = U[m, m] * S[2, n+b, S_m]
+        end
+    end
+    return
+end
+
+# complex U, multiple states in S
 @inline function subspace_mul_kernel_complex!(S::AbstractArray{T, 3}, (C_re, C_im), indices, (U_re, U_im), k::Int, _b::Int, Bmax::Int, offset::Int) where {T <: Base.HWReal}
     b = _b << 3;
     bmax = b + 8
@@ -121,6 +171,32 @@ end
             S_m = k + indices[m] + offset
             S[1,n+b,S_m] = C_re[m,n]
             S[2,n+b,S_m] = C_im[m,n]
+        end
+    end
+    return
+end
+
+# Diagonal complex U, multiple states in S
+@inline function subspace_mul_kernel_complex!(S::AbstractArray{T, 3}, (C_re, C_im), indices,
+    U::Diagonal{Complex{T}}, k::Int, _b::Int, Bmax::Int, offset::Int) where {T <: Base.HWReal}
+
+    b = _b << 3;
+    bmax = b + 8
+    if bmax ≤ Bmax # full static block
+        @avx for n ∈ 1:8, m ∈ axes(U, 1)
+            S_m = k + indices[m] + offset
+            S[1, n+b, S_m], S[2, n+b, S_m] =
+                real(U[m, m]) * S[1, n+b, S_m] - imag(U[m, m]) * S[2, n+b, S_m],
+                real(U[m, m]) * S[2, n+b, S_m] + imag(U[m, m]) * S[1, n+b, S_m]
+        end
+        # AmulB!(C_re, C_im, U, U_im, 
+    else # dynamic block
+        Nmax = 8 + Bmax - bmax
+        @avx for n ∈ 1:Nmax, m ∈ axes(U, 1)
+            S_m = k + indices[m] + offset
+            S[1, n+b, S_m], S[2, n+b, S_m] =
+                real(U[m, m]) * S[1, n+b, S_m] - imag(U[m, m]) * S[2, n+b, S_m],
+                real(U[m, m]) * S[2, n+b, S_m] + imag(U[m, m]) * S[1, n+b, S_m]
         end
     end
     return
