@@ -155,8 +155,6 @@ end
         curr = next
     end
 
-    push!(curr.args, :(m == $(2d-2)))
-    push!(curr.args, exp(im * π * (2d-2) / d))
     push!(curr.args, exp(im * π * (2d-1) / d))
 
     return quote
