@@ -17,6 +17,15 @@ function subspace_mul!(st::AbstractVector{T}, comspace, U, subspace, offset=0) w
     end
 end
 
+# specialize on the X gate
+function subspace_mul!(st::AbstractVector{T}, comspace, U::Val{:X_test}, subspace, offset=0) where T
+    #println("subspace_mul! Val{:X_test}")
+    indices = StrideArray{Int}(undef, (StaticInt(2), ))
+    indices[1] = comspace[1] + 1
+    indices[2] = comspace[2] + 1
+    return subspace_mul_generic!(st, indices, U, subspace, offset)
+end
+
 function subspace_mul!(st::AbstractMatrix, comspace, U::AbstractMatrix{T}, subspace, offset=0) where T
     # NOTE: avx version seems to be faster at 8 already
     if size(U, 1) == 4
