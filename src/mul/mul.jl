@@ -24,9 +24,8 @@ function subspace_mul!(st::AbstractVector{T}, loc::Int, U::Val{:X_test}, offset=
     k = 0
 
     while true
-        k_offset = k + offset
-        idx_1 = k_offset + 1
-        idx_2 = (k_offset | loc_bit) + 1
+        idx_1 = k + offset + 1
+        idx_2 = (k | loc_bit) + offset + 1
         
         tmp = st[idx_1]
         st[idx_1] = st[idx_2]
