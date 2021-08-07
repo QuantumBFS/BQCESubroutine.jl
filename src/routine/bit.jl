@@ -33,10 +33,9 @@ function broutine!(st::AbstractVecOrMat, U::Val{:X_test}, locs::Locations)
     #println("broutine! Val{:X_test}")
     @assert 1 == length(locs) "operator dimension mismatch locs"
     n = log2dim(st)
-    @assert n >= maximum(plain(locs)) "locs is too large"
-    subspace = bsubspace(n, locs)
-    comspace = bcomspace(n, locs)
-    subspace_mul!(st, comspace, U, subspace)
+    loc = plain(locs)[begin]
+    @assert n >= loc "locs is too large"
+    subspace_mul!(st, loc, U)
     return st
 end
 

@@ -18,12 +18,28 @@ function subspace_mul!(st::AbstractVector{T}, comspace, U, subspace, offset=0) w
 end
 
 # specialize on the X gate
-function subspace_mul!(st::AbstractVector{T}, comspace, U::Val{:X_test}, subspace, offset=0) where T
-    #println("subspace_mul! Val{:X_test}")
-    indices = StrideArray{Int}(undef, (StaticInt(2), ))
-    indices[1] = comspace[1] + 1
-    indices[2] = comspace[2] + 1
-    return subspace_mul_generic!(st, indices, U, subspace, offset)
+function subspace_mul!(st::AbstractVector{T}, loc::Int, U::Val{:X_test}, offset=0) where T
+    n = log2dim(st)
+    loc_bit = 1 << (loc-1)
+    k = 0
+
+    while true
+        k_offset = k + offset
+        idx_1 = k_offset + 1
+        idx_2 = (k_offset | loc_bit) + 1
+        
+        tmp = st[idx_1]
+        st[idx_1] = st[idx_2]
+        st[idx_2] = tmp
+
+        k += 1
+        if k & loc_bit != 0
+            k += loc_bit
+        end
+        if k >= 1<<n
+            break
+        end
+    end
 end
 
 function subspace_mul!(st::AbstractMatrix, comspace, U::AbstractMatrix{T}, subspace, offset=0) where T

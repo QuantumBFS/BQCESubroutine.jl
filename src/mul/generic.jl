@@ -20,13 +20,13 @@ function subspace_mul_generic!(S::AbstractVector{T}, indices, U::AbstractMatrix,
 end
 
 # specialize on the X gate
-function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Val{:X_test}, subspace, offset=0) where {T}
-    #println("subspace_mul_generic! Val{:X_test}")
-    y = nothing
-    for k in subspace
-        subspace_mul_kernel_generic!(S, y, indices, U, k, offset)
-    end
-end
+# function subspace_mul_generic!(S::AbstractVector{T}, indices, U::Val{:X_test}, subspace, offset=0) where {T}
+#     #println("subspace_mul_generic! Val{:X_test}")
+#     y = nothing
+#     for k in subspace
+#         subspace_mul_kernel_generic!(S, y, indices, U, k, offset)
+#     end
+# end
 
 function subspace_mul_generic!(S::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, offset=0) where {T}
     D = StrideArrays.static_length(indices)

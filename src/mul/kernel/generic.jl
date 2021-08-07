@@ -20,11 +20,11 @@ indices: array of indices from comspace
 end
 
 # real U, single real state, specialize on the X gate
-@inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U::Val{:X_test}, k::Int, offset::Int) where T
-    idx_1 = k + indices[1] + offset
-    idx_2 = k + indices[2] + offset
-    S[idx_1], S[idx_2] = S[idx_2], S[idx_1]
-end
+# @inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U::Val{:X_test}, k::Int, offset::Int) where T
+#     idx_1 = k + indices[1] + offset
+#     idx_2 = k + indices[2] + offset
+#     S[idx_1], S[idx_2] = S[idx_2], S[idx_1]
+# end
 
 # real U, multiple real states
 @inline function subspace_mul_kernel_generic!(S::AbstractMatrix{T}, y, indices, U, k::Int, b::Int, offset::Int) where T
