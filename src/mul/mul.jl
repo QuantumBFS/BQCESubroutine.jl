@@ -18,25 +18,95 @@ function subspace_mul!(st::AbstractVector{T}, comspace, U, subspace, offset=0) w
 end
 
 # specialize on the X gate
-function subspace_mul!(st::AbstractVector{T}, loc::Int, U::Val{:X_test}, offset=0) where T
+function subspace_mul!(st::AbstractVector{T}, U::Val{:X_test}, loc::Int) where T
     n = log2dim(st)
-    loc_bit = 1 << (loc-1)
-    k = 0
 
-    while true
-        idx_1 = k + offset + 1
-        idx_2 = (k | loc_bit) + offset + 1
-        
-        tmp = st[idx_1]
-        st[idx_1] = st[idx_2]
-        st[idx_2] = tmp
-
-        k += 1
-        if k & loc_bit != 0
-            k += loc_bit
+    if loc == 1
+        for k in 0:2:((1<<n)-1)
+            idx_1 = k
+            idx_2 = k | 1
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
         end
-        if k >= 1<<n
-            break
+    elseif loc == 2
+        for k in 0:4:((1<<n)-1)
+            idx_1 = k
+            idx_2 = k | 0b10
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b01
+            idx_2 = k | 0b11
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+        end
+    elseif loc == 3
+        for k in 0:8:((1<<n)-1)
+            idx_1 = k
+            idx_2 = k | 0b100
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b001
+            idx_2 = k | 0b101
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b010
+            idx_2 = k | 0b110
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b011
+            idx_2 = k | 0b111
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+        end
+    elseif loc == 4
+        for k in 0:16:((1<<n)-1)
+            idx_1 = k
+            idx_2 = k | 0b1000
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0001
+            idx_2 = k | 0b1001
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0010
+            idx_2 = k | 0b1010
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0011
+            idx_2 = k | 0b1011
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0100
+            idx_2 = k | 0b1100
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0101
+            idx_2 = k | 0b1101
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0110
+            idx_2 = k | 0b1110
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b0111
+            idx_2 = k | 0b1111
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+        end
+    else
+        loc_bit = 1 << (loc-1)
+        for k_highbits in 0 : (1<<loc) : ((1<<n)-1)
+            for k in k_highbits : 8 : ((k_highbits | loc_bit) - 1)
+                idx_1 = k
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b001
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b010
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b011
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b100
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b101
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b110
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+                idx_1 = k | 0b111
+                idx_2 = idx_1 | loc_bit
+                @inbounds @swap st[idx_1+1] st[idx_2+1]
+            end
         end
     end
 end

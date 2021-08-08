@@ -29,3 +29,11 @@ function ctrl_offset(ctrl::CtrlLocations)
     end
     return mask
 end
+
+macro swap(p, q)
+    return quote
+        tmp = $(esc(p))
+        $(esc(p)) = $(esc(q))
+        $(esc(q)) = tmp
+    end
+end

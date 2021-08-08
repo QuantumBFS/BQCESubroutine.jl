@@ -35,7 +35,7 @@ function broutine!(st::AbstractVecOrMat, U::Val{:X_test}, locs::Locations)
     n = log2dim(st)
     loc = plain(locs)[begin]
     @assert n >= loc "locs is too large"
-    subspace_mul!(st, loc, U)
+    subspace_mul!(st, U, loc)
     return st
 end
 
