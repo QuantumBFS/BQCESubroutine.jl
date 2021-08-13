@@ -22,13 +22,13 @@ function subspace_mul!(st::AbstractVector{T}, U::Val{:X_test}, loc::Int) where T
     n = log2dim(st)
 
     if loc == 1
-        for k in 0:2:((1<<n)-1)
+        @batch for k in 0:2:((1<<n)-1)
             idx_1 = k
             idx_2 = k | 1
             @inbounds @swap st[idx_1+1] st[idx_2+1]
         end
     elseif loc == 2
-        for k in 0:4:((1<<n)-1)
+        @batch for k in 0:4:((1<<n)-1)
             idx_1 = k
             idx_2 = k | 0b10
             @inbounds @swap st[idx_1+1] st[idx_2+1]
@@ -37,7 +37,7 @@ function subspace_mul!(st::AbstractVector{T}, U::Val{:X_test}, loc::Int) where T
             @inbounds @swap st[idx_1+1] st[idx_2+1]
         end
     elseif loc == 3
-        for k in 0:8:((1<<n)-1)
+        @batch for k in 0:8:((1<<n)-1)
             idx_1 = k
             idx_2 = k | 0b100
             @inbounds @swap st[idx_1+1] st[idx_2+1]
@@ -52,7 +52,7 @@ function subspace_mul!(st::AbstractVector{T}, U::Val{:X_test}, loc::Int) where T
             @inbounds @swap st[idx_1+1] st[idx_2+1]
         end
     elseif loc == 4
-        for k in 0:16:((1<<n)-1)
+        @batch for k in 0:16:((1<<n)-1)
             idx_1 = k
             idx_2 = k | 0b1000
             @inbounds @swap st[idx_1+1] st[idx_2+1]
@@ -80,33 +80,38 @@ function subspace_mul!(st::AbstractVector{T}, U::Val{:X_test}, loc::Int) where T
         end
     else
         loc_bit = 1 << (loc-1)
-        for k_highbits in 0 : (1<<loc) : ((1<<n)-1)
-            for k in k_highbits : 8 : ((k_highbits | loc_bit) - 1)
-                idx_1 = k
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b001
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b010
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b011
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b100
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b101
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b110
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-                idx_1 = k | 0b111
-                idx_2 = idx_1 | loc_bit
-                @inbounds @swap st[idx_1+1] st[idx_2+1]
-            end
+        mask_highbits = -1 << loc
+        mask_lowbits = ((1<<loc) - 1) & (-1 << 4)
+        # @batch for k_highbits in 0 : (1<<loc) : ((1<<n)-1)
+        #     for k in k_highbits : 8 : ((k_highbits | loc_bit) - 1)
+        @batch for k_continuous in 0 : 16 : ((1<<n)-1)
+            k_highbits = k_continuous & mask_highbits
+            k_lowbits = (k_continuous & mask_lowbits) >> 1
+            k = k_highbits | k_lowbits
+            idx_1 = k
+            idx_2 = k | loc_bit 
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b001
+            idx_2 = k | (0b001 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b010
+            idx_2 = k | (0b010 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b011
+            idx_2 = k | (0b011 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b100
+            idx_2 = k | (0b100 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b101
+            idx_2 = k | (0b101 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b110
+            idx_2 = k | (0b110 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
+            idx_1 = k | 0b111
+            idx_2 = k | (0b111 | loc_bit)
+            @inbounds @swap st[idx_1+1] st[idx_2+1]
         end
     end
 end
