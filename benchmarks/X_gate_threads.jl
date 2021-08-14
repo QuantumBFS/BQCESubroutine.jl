@@ -5,27 +5,26 @@ using BQCESubroutine
 using YaoLocations
 using BQCESubroutine: threaded_basic_broutine!
 
-N = 20
-st = rand(Float64, 1<<N)
-st_mat = rand(Float64, 5, 1<<N)
+N = 27
+#st_mat = rand(Float64, 5, 1<<N)
 X = [0 1; 1 0]
-locs = Locations(19)
+locs = Locations(26)
 
 nthreads = Threads.nthreads()
 println("nthreads=$(nthreads), N=$(N), loc=$(YaoLocations.plain(locs)[begin])")
 
 if nthreads == 1
     BQCESubroutine.disable_threads()
-    print("(:X)      ")
-    @btime st0 = broutine!(copy(st), Val(:X), locs) setup=(st = rand(Float64, 1<<N))
-    print("(:X_test) ")
-    @btime st0 = broutine!(copy(st), Val(:X_test), locs) setup=(st = rand(Float64, 1<<N))
+    print("(:X)      "); st = rand(Float64, 1<<N);
+    @btime st0 = broutine!(st, Val(:X), locs)
+    print("(:X_test) "); st = rand(Float64, 1<<N);
+    @btime st0 = broutine!(st, Val(:X_test), locs)
 else
     BQCESubroutine.enable_threads()
-    print("(:X)      ")
-    @btime st0 = threaded_basic_broutine!(copy(st), Val(:X), locs) setup=(st = rand(Float64, 1<<N))
-    print("(:X_test) ")
-    @btime st0 = broutine!(copy(st), Val(:X_test), locs) setup=(st = rand(Float64, 1<<N))
+    print("(:X)      "); st = rand(Float64, 1<<N)
+    @btime st0 = threaded_basic_broutine!(st, Val(:X), locs)
+    print("(:X_test) "); st = rand(Float64, 1<<N)
+    @btime st0 = broutine!(st, Val(:X_test), locs)
 end
 
 # BQCESubroutine.enable_threads()
@@ -37,141 +36,160 @@ end
 # @test st2 ≈ st0
 # @test st2 ≈ st1
 
-"""
-nthreads=1, N=20, loc=19
-(:X)        1.034 ms (2 allocations: 8.00 MiB)
-(:X_test)   1.185 ms (2 allocations: 8.00 MiB)
-nthreads=2, N=20, loc=19
-(:X)        1.184 ms (14 allocations: 8.00 MiB)
-(:X_test)   1.101 ms (2 allocations: 8.00 MiB)
-nthreads=3, N=20, loc=19
-(:X)        1.204 ms (44 allocations: 8.00 MiB)
-(:X_test)   1.099 ms (2 allocations: 8.00 MiB)
-nthreads=4, N=20, loc=19
-(:X)        1.187 ms (49 allocations: 8.00 MiB)
-(:X_test)   1.104 ms (2 allocations: 8.00 MiB)
-nthreads=5, N=20, loc=19
-(:X)        1.277 ms (53 allocations: 8.00 MiB)
-(:X_test)   1.101 ms (2 allocations: 8.00 MiB)
-nthreads=6, N=20, loc=19
-(:X)        1.231 ms (58 allocations: 8.00 MiB)
-(:X_test)   1.092 ms (2 allocations: 8.00 MiB)
-nthreads=7, N=20, loc=19
-(:X)        1.234 ms (63 allocations: 8.00 MiB)
-(:X_test)   1.136 ms (2 allocations: 8.00 MiB)
-nthreads=8, N=20, loc=19
-(:X)        1.399 ms (68 allocations: 8.00 MiB)
-(:X_test)   1.165 ms (2 allocations: 8.00 MiB)
-nthreads=9, N=20, loc=19
-(:X)        1.237 ms (72 allocations: 8.01 MiB)
-(:X_test)   1.153 ms (2 allocations: 8.00 MiB)
-nthreads=10, N=20, loc=19
-(:X)        1.314 ms (77 allocations: 8.01 MiB)
-(:X_test)   1.142 ms (2 allocations: 8.00 MiB)
-nthreads=11, N=20, loc=19
-(:X)        1.230 ms (82 allocations: 8.01 MiB)
-(:X_test)   1.276 ms (2 allocations: 8.00 MiB)
-nthreads=12, N=20, loc=19
-(:X)        1.276 ms (87 allocations: 8.01 MiB)
-(:X_test)   1.150 ms (2 allocations: 8.00 MiB)
-"""
 
-"""
-nthreads=1, N=20, loc=1
-(:X)        1.099 ms (2 allocations: 8.00 MiB)
-(:X_test)   1.170 ms (2 allocations: 8.00 MiB)
-nthreads=2, N=20, loc=1
-(:X)        1.198 ms (13 allocations: 8.00 MiB)
-(:X_test)   1.090 ms (2 allocations: 8.00 MiB)
-nthreads=3, N=20, loc=1
-(:X)        1.174 ms (18 allocations: 8.00 MiB)
-(:X_test)   1.086 ms (2 allocations: 8.00 MiB)
-nthreads=4, N=20, loc=1
-(:X)        1.181 ms (23 allocations: 8.00 MiB)
-(:X_test)   1.097 ms (2 allocations: 8.00 MiB)
-nthreads=5, N=20, loc=1
-(:X)        1.197 ms (27 allocations: 8.00 MiB)
-(:X_test)   1.082 ms (2 allocations: 8.00 MiB)
-nthreads=6, N=20, loc=1
-(:X)        1.207 ms (33 allocations: 8.00 MiB)
-(:X_test)   1.087 ms (2 allocations: 8.00 MiB)
-nthreads=7, N=20, loc=1
-(:X)        1.207 ms (38 allocations: 8.00 MiB)
-(:X_test)   1.122 ms (2 allocations: 8.00 MiB)
-nthreads=8, N=20, loc=1
-(:X)        1.262 ms (43 allocations: 8.00 MiB)
-(:X_test)   1.160 ms (2 allocations: 8.00 MiB)
-"""
+# nthreads=1, N=20, loc=1
+# (:X)        393.020 μs (0 allocations: 0 bytes)
+# (:X_test)   416.215 μs (0 allocations: 0 bytes)
+# nthreads=2, N=20, loc=1
+# (:X)        392.456 μs (10 allocations: 976 bytes)
+# (:X_test)   228.165 μs (0 allocations: 0 bytes)
+# nthreads=3, N=20, loc=1
+# (:X)        237.750 μs (15 allocations: 1.41 KiB)
+# (:X_test)   172.577 μs (0 allocations: 0 bytes)
+# nthreads=4, N=20, loc=1
+# (:X)        176.847 μs (20 allocations: 1.84 KiB)
+# (:X_test)   135.359 μs (0 allocations: 0 bytes)
+# nthreads=5, N=20, loc=1
+# (:X)        156.637 μs (26 allocations: 2.33 KiB)
+# (:X_test)   132.398 μs (0 allocations: 0 bytes)
+# nthreads=6, N=20, loc=1
+# (:X)        221.977 μs (31 allocations: 2.77 KiB)
+# (:X_test)   143.198 μs (0 allocations: 0 bytes)
 
 
-"""
-nthreads=1, N=20, loc=1
-(:X)        1.138 ms (2 allocations: 8.00 MiB)
-(:X_test)   1.134 ms (2 allocations: 8.00 MiB)
-nthreads=2, N=20, loc=1
-(:X)        1.208 ms (13 allocations: 8.00 MiB)
-(:X_test)   1.102 ms (2 allocations: 8.00 MiB)
-nthreads=3, N=20, loc=1
-(:X)        1.163 ms (18 allocations: 8.00 MiB)
-(:X_test)   1.094 ms (2 allocations: 8.00 MiB)
-nthreads=4, N=20, loc=1
-(:X)        1.163 ms (23 allocations: 8.00 MiB)
-(:X_test)   1.078 ms (2 allocations: 8.00 MiB)
-nthreads=5, N=20, loc=1
-(:X)        1.182 ms (28 allocations: 8.00 MiB)
-(:X_test)   1.076 ms (2 allocations: 8.00 MiB)
-nthreads=6, N=20, loc=1
-(:X)        1.194 ms (33 allocations: 8.00 MiB)
-(:X_test)   1.091 ms (2 allocations: 8.00 MiB)
-nthreads=7, N=20, loc=1
-(:X)        1.252 ms (38 allocations: 8.00 MiB)
-(:X_test)   1.266 ms (2 allocations: 8.00 MiB)
-nthreads=8, N=20, loc=1
-(:X)        1.221 ms (43 allocations: 8.00 MiB)
-(:X_test)   1.115 ms (2 allocations: 8.00 MiB)
-nthreads=9, N=20, loc=1
-(:X)        1.313 ms (48 allocations: 8.00 MiB)
-(:X_test)   1.129 ms (2 allocations: 8.00 MiB)
-nthreads=10, N=20, loc=1
-(:X)        1.250 ms (53 allocations: 8.00 MiB)
-(:X_test)   1.344 ms (2 allocations: 8.00 MiB)
-"""
+# nthreads=1, N=20, loc=2
+# (:X)        286.745 μs (0 allocations: 0 bytes)
+# (:X_test)   303.868 μs (0 allocations: 0 bytes)
+# nthreads=2, N=20, loc=2
+# (:X)        1.159 ms (11 allocations: 1008 bytes)
+# (:X_test)   174.305 μs (0 allocations: 0 bytes)
+# nthreads=3, N=20, loc=2
+# (:X)        784.214 μs (16 allocations: 1.44 KiB)
+# (:X_test)   126.767 μs (0 allocations: 0 bytes)
+# nthreads=4, N=20, loc=2
+# (:X)        611.036 μs (20 allocations: 1.84 KiB)
+# (:X_test)   112.259 μs (0 allocations: 0 bytes)
+# nthreads=5, N=20, loc=2
+# (:X)        445.028 μs (25 allocations: 2.30 KiB)
+# (:X_test)   98.634 μs (0 allocations: 0 bytes)
+# nthreads=6, N=20, loc=2
+# (:X)        396.393 μs (31 allocations: 2.77 KiB)
+# (:X_test)   103.864 μs (0 allocations: 0 bytes)
 
-"""
-nthreads=1, N=20, loc=1
-  1.108 ms (2 allocations: 8.00 MiB)
-nthreads=2, N=20, loc=1
-  1.021 ms (13 allocations: 8.00 MiB)
-nthreads=3, N=20, loc=1
-  1.158 ms (18 allocations: 8.00 MiB)
-nthreads=4, N=20, loc=1
-  1.080 ms (23 allocations: 8.00 MiB)
-nthreads=5, N=20, loc=1
-  1.165 ms (28 allocations: 8.00 MiB)
-nthreads=6, N=20, loc=1
-  1.189 ms (33 allocations: 8.00 MiB)
-"""
 
-"""
-n=27, loc=15
-nthreads = 1
-  478.007 ms (2 allocations: 1.00 GiB)
-nthreads = 2
-  373.456 ms (13 allocations: 1.00 GiB)
-nthreads = 3
-  507.799 ms (18 allocations: 1.00 GiB)
-nthreads = 4
-  401.522 ms (23 allocations: 1.00 GiB)
-nthreads = 5
-  521.116 ms (28 allocations: 1.00 GiB)
-nthreads = 6
-  414.089 ms (33 allocations: 1.00 GiB)
-nthreads = 7
-  429.090 ms (39 allocations: 1.00 GiB)
-nthreads = 8
-  423.105 ms (43 allocations: 1.00 GiB)
-nthreads = 9
-  559.256 ms (49 allocations: 1.00 GiB)
-nthreads = 10
-  426.913 ms (53 allocations: 1.00 GiB)
-"""
+# nthreads=1, N=20, loc=19
+# (:X)        467.459 μs (0 allocations: 0 bytes)
+# (:X_test)   463.887 μs (0 allocations: 0 bytes)
+# nthreads=2, N=20, loc=19
+# (:X)        321.675 μs (10 allocations: 976 bytes)
+# (:X_test)   246.473 μs (0 allocations: 0 bytes)
+# nthreads=3, N=20, loc=19
+# (:X)        310.752 μs (42 allocations: 2.50 KiB)
+# (:X_test)   170.051 μs (0 allocations: 0 bytes)
+# nthreads=4, N=20, loc=19
+# (:X)        160.359 μs (46 allocations: 2.91 KiB)
+# (:X_test)   129.819 μs (0 allocations: 0 bytes)
+# nthreads=5, N=20, loc=19
+# (:X)        187.570 μs (50 allocations: 3.31 KiB)
+# (:X_test)   122.218 μs (0 allocations: 0 bytes)
+# nthreads=6, N=20, loc=19
+# (:X)        203.632 μs (56 allocations: 3.78 KiB)
+# (:X_test)   155.127 μs (0 allocations: 0 bytes)
+
+
+# nthreads=1, N=27, loc=1
+# (:X)        82.911 ms (0 allocations: 0 bytes)
+# (:X_test)   82.250 ms (0 allocations: 0 bytes)
+# nthreads=2, N=27, loc=1
+# (:X)        77.728 ms (11 allocations: 1008 bytes)
+# (:X_test)   77.931 ms (0 allocations: 0 bytes)
+# nthreads=3, N=27, loc=1
+# (:X)        79.764 ms (16 allocations: 1.44 KiB)
+# (:X_test)   79.565 ms (0 allocations: 0 bytes)
+# nthreads=4, N=27, loc=1
+# (:X)        80.638 ms (21 allocations: 1.88 KiB)
+# (:X_test)   80.327 ms (0 allocations: 0 bytes)
+# nthreads=5, N=27, loc=1
+# (:X)        85.968 ms (26 allocations: 2.33 KiB)
+# (:X_test)   85.183 ms (0 allocations: 0 bytes)
+# nthreads=6, N=27, loc=1
+# (:X)        83.232 ms (31 allocations: 2.77 KiB)
+# (:X_test)   86.126 ms (0 allocations: 0 bytes)
+
+
+# nthreads=1, N=27, loc=26
+# (:X)        90.445 ms (0 allocations: 0 bytes)
+# (:X_test)   91.236 ms (0 allocations: 0 bytes)
+# nthreads=2, N=27, loc=26
+# (:X)        84.067 ms (11 allocations: 1008 bytes)
+# (:X_test)   82.908 ms (0 allocations: 0 bytes)
+# nthreads=3, N=27, loc=26
+# (:X)        85.520 ms (50 allocations: 3.20 KiB)
+# (:X_test)   81.942 ms (0 allocations: 0 bytes)
+# nthreads=4, N=27, loc=26
+# (:X)        83.138 ms (56 allocations: 3.67 KiB)
+# (:X_test)   83.344 ms (0 allocations: 0 bytes)
+# nthreads=5, N=27, loc=26
+# (:X)        83.194 ms (59 allocations: 3.66 KiB)
+# (:X_test)   84.787 ms (0 allocations: 0 bytes)
+# nthreads=6, N=27, loc=26
+# (:X)        84.699 ms (63 allocations: 4.06 KiB)
+# (:X_test)   86.761 ms (0 allocations: 0 bytes)
+# nthreads=7, N=27, loc=26
+# (:X)        86.438 ms (68 allocations: 4.52 KiB)
+# (:X_test)   86.593 ms (0 allocations: 0 bytes)
+# nthreads=8, N=27, loc=26
+# (:X)        88.098 ms (74 allocations: 4.98 KiB)
+# (:X_test)   86.711 ms (0 allocations: 0 bytes)
+# nthreads=9, N=27, loc=26
+# (:X)        88.768 ms (78 allocations: 5.39 KiB)
+# (:X_test)   88.009 ms (0 allocations: 0 bytes)
+# nthreads=10, N=27, loc=26
+# (:X)        91.170 ms (84 allocations: 5.86 KiB)
+# (:X_test)   91.436 ms (0 allocations: 0 bytes)
+# nthreads=11, N=27, loc=26
+# (:X)        89.793 ms (90 allocations: 6.34 KiB)
+# (:X_test)   90.596 ms (0 allocations: 0 bytes)
+# nthreads=12, N=27, loc=26
+# (:X)        93.518 ms (93 allocations: 6.72 KiB)
+# (:X_test)   90.147 ms (0 allocations: 0 bytes)
+
+
+# nthreads=1, N=30, loc=1
+# (:X)        721.110 ms (0 allocations: 0 bytes)
+# (:X_test)   712.518 ms (0 allocations: 0 bytes)
+# nthreads=2, N=30, loc=1
+# (:X)        685.586 ms (11 allocations: 1008 bytes)
+# (:X_test)   653.881 ms (0 allocations: 0 bytes)
+# nthreads=3, N=30, loc=1
+# (:X)        658.853 ms (16 allocations: 1.44 KiB)
+# (:X_test)   670.592 ms (0 allocations: 0 bytes)
+# nthreads=4, N=30, loc=1
+# (:X)        670.990 ms (21 allocations: 1.88 KiB)
+# (:X_test)   688.172 ms (0 allocations: 0 bytes)
+# nthreads=5, N=30, loc=1
+# (:X)        679.900 ms (26 allocations: 2.33 KiB)
+# (:X_test)   674.324 ms (0 allocations: 0 bytes)
+# nthreads=6, N=30, loc=1
+# (:X)        688.539 ms (31 allocations: 2.77 KiB)
+# (:X_test)   697.369 ms (3 allocations: 96 bytes)
+
+
+# nthreads=1, N=30, loc=29
+# (:X)        776.729 ms (0 allocations: 0 bytes)
+# (:X_test)   746.518 ms (0 allocations: 0 bytes)
+# nthreads=2, N=30, loc=29
+# (:X)        670.826 ms (11 allocations: 1008 bytes)
+# (:X_test)   740.097 ms (0 allocations: 0 bytes)
+# nthreads=3, N=30, loc=29
+# (:X)        720.817 ms (53 allocations: 3.33 KiB)
+# (:X_test)   712.385 ms (0 allocations: 0 bytes)
+# nthreads=4, N=30, loc=29
+# (:X)        715.219 ms (59 allocations: 3.80 KiB)
+# (:X_test)   700.401 ms (0 allocations: 0 bytes)
+# nthreads=5, N=30, loc=29
+# (:X)        723.867 ms (64 allocations: 4.23 KiB)
+# (:X_test)   743.391 ms (1 allocation: 32 bytes)
+# nthreads=6, N=30, loc=29
+# (:X)        729.739 ms (68 allocations: 4.64 KiB)
+# (:X_test)   747.555 ms (2 allocations: 64 bytes)

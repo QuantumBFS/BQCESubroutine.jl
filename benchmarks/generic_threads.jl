@@ -19,8 +19,8 @@ print("nthreads=$(nthreads), N=$N, M=$M")
 
 if nthreads == 1
     BQCESubroutine.disable_threads()
-    @btime st1 = BQCESubroutine.subspace_mul!(copy(st), comspace, U, subspace)
+    @btime st1 = BQCESubroutine.subspace_mul!(st, comspace, U, subspace)
 else
     BQCESubroutine.enable_threads()
-    @btime st1 = BQCESubroutine.threaded_subspace_mul_generic!(copy(st), comspace, U, subspace)
+    @btime st1 = BQCESubroutine.threaded_subspace_mul_generic!(st, comspace, U, subspace)
 end
