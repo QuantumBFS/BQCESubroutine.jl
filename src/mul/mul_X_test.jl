@@ -98,7 +98,6 @@ end
 
 @inline function subspace_mul_X_test_large_loc_3!(st::AbstractVector, n::Int, loc::Int)
     # for loc≥5.
-    println("subspace_mul_X_test_large_loc_3!")
     n_minus_loc = n - loc
     if n_minus_loc == 0
         loc_bit = 1<<(n-1)
