@@ -61,12 +61,14 @@ function subspace_mul!(st::AbstractVector, U::Val{:X_test}, loc::Int)
         end
     else
         # subspace_mul_X_test_large_loc_1!(st, n, loc)
-        subspace_mul_X_test_large_loc_2!(st, n, loc)
+        # subspace_mul_X_test_large_loc_2!(st, n, loc)
+        subspace_mul_X_test_large_loc_3!(st, n, loc)
     end
 end
 
 
-@inline function subspace_mul_X_test_large_loc_1!(st::AbstractVector, n::Int, loc::Int) #loc≥5
+@inline function subspace_mul_X_test_large_loc_1!(st::AbstractVector, n::Int, loc::Int)
+    # the original loops for large loc (loc≥5)
     loc_bit = 1 << (loc-1)
     mask_highbits = -1 << loc
     mask_lowbits = ((1<<loc) - 1) & (-1 << 4)
@@ -78,7 +80,10 @@ end
 end
 
 
-@inline function subspace_mul_X_test_large_loc_2!(st::AbstractVector, n::Int, loc::Int) #loc≥5
+@inline function subspace_mul_X_test_large_loc_2!(st::AbstractVector, n::Int, loc::Int)
+    # for loc≥5.
+    # better load balance but larger kernel for each thread,
+    # since we need to recover k from k_continuous.
     loc_bit = 1 << (loc-1)
     mask_highbits = -1 << loc
     mask_lowbits = ((1<<loc) - 1) & (-1 << 4)
@@ -87,6 +92,88 @@ end
         k_lowbits = (k_continuous & mask_lowbits) >> 1
         k = k_highbits | k_lowbits
         subspace_mul_X_test_large_loc_kernel!(st, k, loc_bit)
+    end
+end
+
+
+@inline function subspace_mul_X_test_large_loc_3!(st::AbstractVector, n::Int, loc::Int)
+    # for loc≥5.
+    println("subspace_mul_X_test_large_loc_3!")
+    n_minus_loc = n - loc
+    if n_minus_loc == 0
+        loc_bit = 1<<(n-1)
+        @inbounds @batch for k in 0 : (loc_bit - 1)
+            idx_1 = k
+            idx_2 = k | (1<<(n-1))
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+        end
+    elseif n_minus_loc == 1
+        loc_bit = 1<<(n-2)
+        mask_1 = 1<<(n-1)
+        @inbounds @batch for k in 0 : (loc_bit - 1)
+            idx_1 = k 
+            idx_2 = k | loc_bit
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_1
+            idx_2 = k | (mask_1 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+        end
+    elseif n_minus_loc == 2
+        loc_bit = 1<<(n-3)
+        mask_01 =            1<<(n-2)
+        mask_10 = 1<<(n-1)
+        mask_11 = 1<<(n-1) | 1<<(n-2)
+        @inbounds @batch for k in 0 : (loc_bit - 1)
+            idx_1 = k 
+            idx_2 = k | loc_bit
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_01
+            idx_2 = k | (mask_01 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_10
+            idx_2 = k | (mask_10 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_11
+            idx_2 = k | (mask_11 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+        end
+    elseif n_minus_loc == 3
+        loc_bit = 1<<(n-4)
+        mask_001 =                       1<<(n-3)
+        mask_010 =            1<<(n-2)
+        mask_011 =            1<<(n-2) | 1<<(n-3)
+        mask_100 = 1<<(n-1)
+        mask_101 = 1<<(n-1)            | 1<<(n-3)
+        mask_110 = 1<<(n-1) | 1<<(n-2)
+        mask_111 = 1<<(n-1) | 1<<(n-2) | 1<<(n-3)
+        @inbounds @batch for k in 0 : (loc_bit - 1)
+            idx_1 = k 
+            idx_2 = k | loc_bit
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_001
+            idx_2 = k | (mask_001 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_010
+            idx_2 = k | (mask_010 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_011
+            idx_2 = k | (mask_011 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_100
+            idx_2 = k | (mask_100 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_101
+            idx_2 = k | (mask_101 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_110
+            idx_2 = k | (mask_110 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+            idx_1 = k | mask_111
+            idx_2 = k | (mask_111 | loc_bit)
+            subspace_mul_X_test_swap!(st, idx_1, idx_2)
+        end
+    else
+        subspace_mul_X_test_large_loc_1!(st, n, loc)
     end
 end
 
