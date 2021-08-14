@@ -60,8 +60,8 @@ function subspace_mul!(st::AbstractVector, U::Val{:X_test}, loc::Int)
             subspace_mul_X_test_swap!(st, idx_1, idx_2)
         end
     else
-        # subspace_mul_X_test_kernel_1!(st, n, loc)
-        subspace_mul_X_test_kernel_2!(st, n, loc)
+        # subspace_mul_X_test_large_loc_1!(st, n, loc)
+        subspace_mul_X_test_large_loc_2!(st, n, loc)
     end
 end
 
