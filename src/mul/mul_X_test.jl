@@ -61,7 +61,7 @@ function subspace_mul!(st::AbstractVector, U::Val{:X_test}, loc::Int)
         end
     else
         # subspace_mul_X_test_kernel_1!(st, n, loc)
-        # subspace_mul_X_test_kernel_2!(st, n, loc)
+        subspace_mul_X_test_kernel_2!(st, n, loc)
     end
 end
 
