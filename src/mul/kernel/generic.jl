@@ -2,7 +2,7 @@
 k: an index from subspace
 indices: array of indices from comspace
 """
-# real U, single real state
+# generic U, single state
 @inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U, k::Int, offset::Int) where T
     @inbounds for i in axes(U, 1)
         y[i] = zero(T)
@@ -19,7 +19,7 @@ indices: array of indices from comspace
     return
 end
 
-# real U, multiple real states
+# generic U, multiple states
 @inline function subspace_mul_kernel_generic!(S::AbstractMatrix{T}, y, indices, U, k::Int, b::Int, offset::Int) where T
     @inbounds for i in axes(U, 1)
         y[i] = zero(T)
@@ -36,7 +36,7 @@ end
     return
 end
 
-# Diagonal real U, single real state
+# Diagonal U, single state
 @inline function subspace_mul_kernel_generic!(S::AbstractVector{T}, y, indices, U::Diagonal, k::Int, offset::Int) where T
     @inbounds for i in axes(U, 1)
         idx_i = k + indices[i] + offset
@@ -45,7 +45,7 @@ end
     return
 end
 
-# Diagonal real U, multiple real states
+# Diagonal U, multiple states
 @inline function subspace_mul_kernel_generic!(S::AbstractMatrix{T}, y, indices, U::Diagonal, k::Int, b::Int, offset::Int) where T
     @inbounds for i in axes(U, 1)
         idx_i = k + indices[i] + offset
