@@ -17,6 +17,7 @@ include("utils2.jl")
 include("schedule.jl")
 include("subspace/bit.jl")
 include("mul/mul.jl")
+include("mul/mul_X_test.jl")
 include("routine/bit.jl")
 include("threading.jl")
 

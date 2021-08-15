@@ -1,3 +1,5 @@
+# TODO: This test fails with multithread (a lot of undefined variables)
+
 using Test
 using LinearAlgebra
 using BQCESubroutine
@@ -175,5 +177,16 @@ end
                 @test broutine!(copy(st), U, locs, ctrl) ≈ broutine!(copy(st), U_dense, locs, ctrl)
             end
         end
+    end
+end
+
+@testset "gate X (:X_test)" begin
+    X = [0 1; 1 0]
+    st = rand(Float64, 1<<N)
+    @testset "i=$i" for i in 1:N
+        locs = Locations([i])
+        ctrl = CtrlLocations((mod1(i+1, N), mod1(i+3, N)))
+        @test broutine!(copy(st), Val(:X_test), locs) ≈ broutine!(copy(st), X, locs)
+        #@test broutine!(copy(st), Val(:X_test), locs, ctrl) ≈ broutine!(copy(st), X, locs, ctrl)
     end
 end
