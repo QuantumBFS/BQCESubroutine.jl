@@ -89,7 +89,7 @@ end
     mask_lowbits = ((1<<loc) - 1) & (-1 << 4)
     @inbounds @batch for k_continuous in 0 : 16 : ((1<<n)-1)
         k_highbits = k_continuous & mask_highbits
-        k_lowbits = (k_continuous & mask_lowbits) >> 1
+        k_lowbits = (k_continuous & mask_lowbits) >>> 1
         k = k_highbits | k_lowbits
         subspace_mul_X_test_large_loc_kernel!(st, k, loc_bit)
     end
@@ -199,7 +199,7 @@ end
 
     @inbounds @batch for k_continuous in 0 : (1<<(n-num_highbits)) : ((num_threads-1)<<(n-num_highbits))
         k_highbits = k_continuous & mask_highbits
-        k_lowbits = (k_continuous & mask_lowbits) >> 1
+        k_lowbits = (k_continuous & mask_lowbits) >>> 1
         k = k_highbits | k_lowbits
         j_max = (1 << (n-1-num_highbits)) - 1
         for j in k : (k | j_max)
