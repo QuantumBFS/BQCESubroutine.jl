@@ -230,8 +230,9 @@ function codegen_broutine(ctx::BitContext, brt::BitRoutine)
         if size(brt) == 2
             multi = forward_routine(:multi_broutine2x2!, ctx, brt)
             push!(basic_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
+        else
+            push!(basic_ret.args, assertion)
         end
-        push!(basic_ret.args, assertion)
         push!(basic_ret.args, forward_routine(:basic_broutine!, ctx, brt))
         push!(basic_ret.args, :(return $(ctx.st)))
 
@@ -239,8 +240,9 @@ function codegen_broutine(ctx::BitContext, brt::BitRoutine)
         if size(brt) == 2
             multi = forward_routine(:threaded_multi_broutine2x2!, ctx, brt)
             push!(threaded_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
+        else
+            push!(threaded_ret.args, assertion)
         end
-        push!(threaded_ret.args, assertion)
         push!(threaded_ret.args, forward_routine(:threaded_basic_broutine!, ctx, brt))
         push!(threaded_ret.args, :(return $(ctx.st)))
         return quote
