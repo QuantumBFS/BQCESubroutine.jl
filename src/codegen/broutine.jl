@@ -388,7 +388,16 @@ function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
     lheads = []
     push!(lheads, :($(idx(1)) = 0:$(step_h(ctx, n)):$(space_length(ctx))-$(step_h(ctx, n))))
 
-    # b2 in b1:step_1_h:b1+step_2_l-step_1_h
+    #=    b2 in b1:step_1_h:b1+step_2_l-step_1_h
+           ___________ step_h(n)
+          | __________ step_l(n)   == step_i_1_l
+          ||  ________ step_h(n-1) == step_i_h
+    loc:  |x |x x
+         0000000000
+         0100000000
+         1000000000
+         1100000000
+    =#
     for i in 2:n
         step_i_h = step_h(ctx, n-i+1)
         step_i_1_l = step_l(ctx, n-i+2)
