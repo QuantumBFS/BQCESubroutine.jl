@@ -520,16 +520,21 @@ The gate operates on 1 qubit,
 and with outermost loop only it is *insufficient* to show best performance of multithreading.
 """
 function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::BitRoutine)
-    @def ctx.hoisted_vars n_highlocs = Base.min($nlocs_needed, $nqubits - 1)
-    @def ctx.hoisted_vars n_lowlocs = $nqubits - $n_highlocs
-    @def ctx.hoisted_vars mask_highbits = -1 << $plain_locs[1]
-    @def ctx.hoisted_vars mask_lowbits = (1 << $plain_locs[1]) - 1
+    # @def ctx.hoisted_vars n_highlocs = Base.min($nlocs_needed, $nqubits - 1)
+    # @def ctx.hoisted_vars n_lowlocs = $nqubits - $n_highlocs
+    # @def ctx.hoisted_vars mask_highbits = -1 << $plain_locs[1]
+    # @def ctx.hoisted_vars mask_lowbits = (1 << $plain_locs[1]) - 1
 
+    @gensym n_highlocs n_lowlocs mask_highbits mask_lowbits
     @gensym k_continuous k_highbits k_lowbits
-    @gensym k m
+    @gensym k m_max m
     kernel = kernel_expr(f_kernel, ctx)
 
     return quote
+        $n_highlocs = Base.min(ctx.hoisted_vars[:nlocs_needed], ctx.hoisted_vars[:nqubits] - 1)
+        $n_lowlocs = ctx.hoisted_vars[:nqubits] - $n_highlocs
+        $mask_highbits = -1 << ctx.hoisted_vars[:plain_locs][1]
+        $mask_lowbits = (1 << ctx.hoisted_vars[:plain_locs][1]) - 1
         @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<n_highlocs)-1) << $n_lowlocs
             $k_highbits = $k_continuous & $mask_highbits
             $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
