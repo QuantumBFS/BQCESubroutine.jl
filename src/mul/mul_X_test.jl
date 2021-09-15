@@ -190,18 +190,18 @@ end
     tot_threads = Threads.nthreads()
     tot_threads == 1 && return subspace_mul_X_test_large_loc_1!(st, n, loc)
 
-    num_highbits = Base.min(log2i(tot_threads), n-1)
-    loc < n-num_highbits && return subspace_mul_X_test_large_loc_2!(st, n, loc)
+    num_highlocs = Base.min(log2i(tot_threads), n-1)
+    loc < n-num_highlocs && return subspace_mul_X_test_large_loc_2!(st, n, loc)
 
-    num_threads = 1 << num_highbits
+    num_threads = 1 << num_highlocs
     mask_highbits = -1 << loc
     mask_lowbits = (1<<loc) - 1
 
-    @inbounds @batch for k_continuous in 0 : (1<<(n-num_highbits)) : ((num_threads-1)<<(n-num_highbits))
+    @inbounds @batch for k_continuous in 0 : (1<<(n-num_highlocs)) : ((num_threads-1)<<(n-num_highlocs))
         k_highbits = k_continuous & mask_highbits
         k_lowbits = (k_continuous & mask_lowbits) >>> 1
         k = k_highbits | k_lowbits
-        j_max = (1 << (n-1-num_highbits)) - 1
+        j_max = (1 << (n-1-num_highlocs)) - 1
         for j in k : (k | j_max)
             idx_1 = j
             idx_2 = j | (1<<(loc-1))

@@ -382,6 +382,11 @@ function subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     end
 end
 
+"""
+Return a `Vector` of the range `Expr`s of nested for-loop indices `idx(1)`, `idx(2)`, ..., `idx(n)`,
+where `n` is the number of qubits the gate operates on.
+Note that the innermost for-loop (`idx(n+1)`) is not included.
+"""
 function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
     def_strides!(ctx, brt)
     n = log2i(size(brt))
@@ -406,6 +411,10 @@ function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
     return lheads
 end
 
+"""
+Return a block `Expr` containing one big nested for-loop whose innermost loop (inside `inner`) is unrolled.
+The innermost loop is fully unrolled if it contains no more than `1 << ctx.expand_sz` iterations.
+"""
 function subspace_step_expanded(outer, kernel, inner::Vector, idx, ctx::BitContext, brt::BitRoutine)
     n = log2i(size(brt))
     ret = Expr(:block)
@@ -445,6 +454,9 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
     @def ctx.hoisted_vars nqubits = $log2i($(space_length(ctx)))
     @def ctx.hoisted_vars nlocs_needed = $log2i(Threads.nthreads()-1) + 1
+    # nthreads      1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 ...
+    # nlocs_needed  0  1  2  2  3  3  3  3  4  4  4  4  4  4  4  4  5 ...
+
     @gensym idx base m
 
     kernel = kernel_expr(f_kernel, ctx)
@@ -457,9 +469,11 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     ret = Expr(:block)
     tbody = subspace_step_expanded(kernel, lheads[2:end], index, ctx, brt) do x
         # Expr(:for, lheads[1], x)
-        :(Threads.@threads $(Expr(:for, lheads[1], x)))
+        :(@batch $(Expr(:for, lheads[1], x)))
     end
     
+    # If the outermost loop is sufficient to show best performance of multithreading
+    # (i.e., xxx ≥ nthreads in "xxx0yyy0zzz")
     push!(ret.args, :(
         if $nlocs_needed ≤ $nqubits - $plain_locs[$n]
             $tbody
@@ -467,12 +481,17 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
         end
     ))
 
+    if n == 1
+        push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
+        return ret
+    end
+
     for t in 1:n-1
         tbody = subspace_step_expanded(idx->kernel(:($base + $idx)), lheads[t+1:end], index, ctx, brt) do x
             subspace_locs = Expr(:tuple, :(1:$m...), [:(plain_locs[$(n-k+1)]) for k in 1:t]...)
             subspace_head = :($base = $bsubspace($nqubits, $subspace_locs))
             # Expr(:for, subspace_head, x)
-            :(Threads.@threads $(Expr(:for, subspace_head, x)))
+            :(@batch $(Expr(:for, subspace_head, x)))
         end
 
         push!(ret.args, :(
@@ -496,6 +515,37 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     return ret
 end
 
+"""
+The gate operates on 1 qubit,
+and with outermost loop only it is *insufficient* to show best performance of multithreading.
+"""
+function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars n_highlocs = Base.min($nlocs_needed, $nqubits - 1)
+    @def ctx.hoisted_vars n_lowlocs = $nqubits - $n_highlocs
+    @def ctx.hoisted_vars mask_highbits = -1 << $plain_locs[1]
+    @def ctx.hoisted_vars mask_lowbits = (1 << $plain_locs[1]) - 1
+
+    @gensym k_continuous k_highbits k_lowbits
+    @gensym k m
+    kernel = kernel_expr(f_kernel, ctx)
+
+    return quote
+        @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<n_highlocs)-1) << $n_lowlocs
+            $k_highbits = $k_continuous & $mask_highbits
+            $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
+            $k = $k_highbits | $k_lowbits
+            $m_max  = (1 << ($n_lowlocs-1)) - 1
+            for $m in $k : $k | $m_max
+                $(kernel(m))
+            end
+        end
+    end
+end
+
+"""
+Loop unrolling with a fully static block (exactly `1 << max` iterations)
+and a dynamic block (less than `1 << max` iterations near the end)
+"""
 function expand_loop(f_kernel, lb, ub, max::Int=3, threading=false)
     @gensym idx1 idx2 idx3 Mmax mmax upperbound
     N = 1 << max
