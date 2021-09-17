@@ -22,7 +22,7 @@ YaoLocations = "66df03fb-d475-48f7-b449-3d9064bf085b"
 Expronicon = "0.6"
 LoopVectorization = "0.12"
 MLStyle = "0.4"
-Polyester = "0.3"
+Polyester = "0.4"
 YaoLocations = "0.1"
 julia = "1.6"
 
