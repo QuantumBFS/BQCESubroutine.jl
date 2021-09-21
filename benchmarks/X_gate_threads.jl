@@ -15,22 +15,27 @@ println("nthreads=$(nthreads), N=$(N), loc=$(YaoLocations.plain(locs)[begin])")
 
 if nthreads == 1
     BQCESubroutine.disable_threads()
-    print("(:X)      "); st = rand(Float64, 1<<N);
-    @btime st0 = broutine!(st, Val(:X), locs)
-    print("(:X_test) "); st = rand(Float64, 1<<N);
-    @btime st0 = broutine!(st, Val(:X_test), locs)
+    print("(:X)      ");
+    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X), $locs)
+    print("(:X_test) ");
+    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X_test), $locs)
 else
     BQCESubroutine.enable_threads()
-    print("(:X)      "); st = rand(Float64, 1<<N)
-    @btime st0 = threaded_basic_broutine!(st, Val(:X), locs)
-    print("(:X_test) "); st = rand(Float64, 1<<N)
-    @btime st0 = broutine!(st, Val(:X_test), locs)
+    print("(:X)      ");
+    @btime st0 = threaded_basic_broutine!(${rand(Float64, 1<<N)}, Val(:X), $locs)
+    print("(:X_test) ")
+    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X_test), $locs)
 end
 
-# BQCESubroutine.enable_threads()
-# st0 = broutine!(copy(st), Val(:X), locs)
-# st1 = BQCESubroutine.threaded_basic_broutine!(copy(st), Val(:X), locs)
-# st2 = broutine!(copy(st), Val(:X_test), locs)
+# N = 20;
+# locs = BQCESubroutine.Locations(19);
+# st = rand(Float64, 1<<N);
+# BQCESubroutine.enable_threads();
+# st0 = broutine!(copy(st), Val(:X), locs);
+# st1 = broutine!(copy(st), Val(:X_test), locs);
+# st0 ≈ st1
+#
+# st2 = BQCESubroutine.threaded_basic_broutine!(copy(st), Val(:X), locs);
 # st3 = broutine!(copy(st), X, locs)
 # @test st2 ≈ st3
 # @test st2 ≈ st0
