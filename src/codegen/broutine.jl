@@ -504,7 +504,7 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     end
 
     push!(ret.args, quote
-        $m = $nqubits - $nlocs_needed - $n
+        $m = Base.max(0, $nqubits - $nlocs_needed - $n)
         Threads.@threads for $base in $bsubspace($nqubits, (1:$m..., $plain_locs...))
             for $(index(1)) in 0:(1 << $m)-1
                 $(kernel( index_base(1) ))
