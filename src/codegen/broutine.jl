@@ -481,10 +481,13 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
         end
     ))
 
-    if n == 1
-        push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
-        return ret
-    end
+    # if n == 1
+    #     push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # elseif n == 2
+    #     push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # end
 
     for t in 1:n-1
         # TODO: for n>=3, we must replace the symbol index(t+1) with the symbol "base" in lheads[t+2]
@@ -530,6 +533,26 @@ function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::B
     @gensym k m_max m
     kernel = kernel_expr(f_kernel, ctx)
 
+    #=     Example
+        mask_highbits 1100000000
+        mask_lowbits  0011111111
+        highlocs      xxxxxx....     parallelized on n_highlocs bits
+        lowlocs       ......xxxx     sequential on (n_lowlocs - 1) bits
+        locs          ..x.......
+        k_highbits    xx........
+        k_lowbits     ...xxxx...
+        m_max         .......xxx
+    =#
+    #=     Another example
+        mask_highbits 0000000000
+        mask_lowbits  1111111111
+        highlocs      xxxxxxxxx.     parallelized on n_highlocs bits
+        lowlocs       .........x     sequential on (n_lowlocs - 1) bits
+        locs          x.........
+        k_highbits    ..........
+        k_lowbits     .xxxxxxxxx
+        m_max         ..........
+    =#
     return quote
         @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
             $k_highbits = $k_continuous & $mask_highbits
@@ -540,7 +563,81 @@ function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::B
                 $(kernel(m))
             end
         end
+        return $(ctx.st)
     end
+end
+
+"""
+The gate operates on 2 qubits,
+and with outermost loop only it is *insufficient* to show best performance of multithreading.
+"""
+function threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars n_highlocs = Base.min($(ctx.hoisted_vars.nlocs_needed), $(ctx.hoisted_vars.nqubits) - 2)
+    @def ctx.hoisted_vars n_lowlocs = $(ctx.hoisted_vars.nqubits) - $n_highlocs
+    @def ctx.hoisted_vars loc_1 = $(ctx.hoisted_vars.plain_locs)[1]
+    @def ctx.hoisted_vars loc_2 = $(ctx.hoisted_vars.plain_locs)[2]
+    @def ctx.hoisted_vars mask_highbits = -1 << $loc_2
+    @def ctx.hoisted_vars mask_lowbits = $(step_l(ctx, 2)) - 1
+    @def ctx.hoisted_vars mask_m_high = ( (1 << ($n_lowlocs - 1 - $loc_1)) - 1 ) << $loc_1
+    @def ctx.hoisted_vars mask_m_low = $(step_l(ctx, 1)) - 1
+
+    @gensym k_continuous k_highbits k_lowbits
+    @gensym k m_max m_continuous m
+    kernel = kernel_expr(f_kernel, ctx)
+
+    ret = Expr(:block)
+
+    #= Case #1: xxxyyy ≥ nthreads in "xxx0yyy0zzz"
+        mask_highbits 1100000000000
+        mask_lowbits  0011111111111
+        highlocs      xxxxxx.......   parallelized on n_highlocs bits
+        lowlocs       ......xxxxxxx   sequential on (n_lowlocs - 2) bits
+        locs          ..x......x...
+        k_highbits    xx...........
+        k_lowbits     ...xxxx......
+        m_max         ........xxxxx
+        mask_m_high   ........xx...
+        mask_m_low    ..........xxx
+        m             .......xx.xxx
+    =#
+    push!(ret.args, quote
+        if $(ctx.hoisted_vars.nlocs_needed) ≤ $(ctx.hoisted_vars.nqubits) - $loc_1 - 1
+            println("threaded_subspace_loop_4x4_nontrivial (Case #1)")
+            @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
+                $k_highbits = $k_continuous & $mask_highbits
+                $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
+                $k = $k_highbits | $k_lowbits
+                $m_max  = (1 << ($n_lowlocs-2)) - 1
+                for $m_continuous in $k : $k | $m_max
+                    $m = (($m_continuous & $mask_m_high) << 1) | ($m_continuous & $mask_m_low)
+                    $(kernel(m))
+                end
+            end
+            return $(ctx.st)
+        end
+    end)
+
+    #= Case #2: xxxyyy < nthreads in "xxx0yyy0zzz"
+        mask_highbits 1100000000000
+        mask_midbits  0011100000000
+        mask_lowbits  0000011111111
+        highlocs      xxxxxxxx.....   parallelized on n_highlocs bits
+        lowlocs       ........xxxxx   sequential on (n_lowlocs - 2) bits
+        locs          ..x...x......
+        k_highbits    xx...........
+        k_midbits     ...xxx.......
+        k_lowbits     .......xxx...
+        m_max         ..........xxx
+    =#
+    push!(ret.args, quote
+        @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
+            println("threaded_subspace_loop_4x4_nontrivial (Case #2)")
+            # TODO
+    end
+        end
+        return $(ctx.st)
+    end)
+    return ret
 end
 
 """
