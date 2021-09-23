@@ -323,7 +323,7 @@ function diagonal_loop(f_kernel, ctx::BitContext)
     expanded = expand_loop(kernel, 0, :($(space_length(ctx)) - 1), ctx.expand_sz, ctx.threading)
     if ctx.threading
         src = :(
-            Threads.@threads for $m = 0:($(space_length(ctx)) - 1)
+            @batch for $m = 0:($(space_length(ctx)) - 1)
                 $(kernel(m))
             end
         )
@@ -491,7 +491,7 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
             subspace_locs = Expr(:tuple, :(1:$m...), [:(plain_locs[$(n-k+1)]) for k in 1:t]...)
             subspace_head = :($base = $bsubspace($nqubits, $subspace_locs))
             # Expr(:for, subspace_head, x)
-            :(@batch $(Expr(:for, subspace_head, x)))
+            :(Threads.@threads $(Expr(:for, subspace_head, x)))
         end
 
         push!(ret.args, :(
@@ -568,7 +568,7 @@ function expand_loop(f_kernel, lb, ub, max::Int=3, threading=false)
     threading && return quote
         $upperbound = $ub
         $Mmax = $ub - $lb
-        Threads.@threads $lbody
+        @batch $lbody
     end
 
     return quote
