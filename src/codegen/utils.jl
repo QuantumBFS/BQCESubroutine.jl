@@ -210,3 +210,18 @@ function isdiag(x::Matrix)
     end
     return true
 end
+
+"""
+Replace all occurrences of Symbol a in ex with Symbol b
+"""
+function replace_symbol(ex::Expr, a::Symbol, b::Symbol)
+    ret = Expr(ex.head)
+    for arg in ex.args
+        push!(ret.args, @match arg begin
+            ::Expr          => replace_symbol(arg, a, b)
+            if arg == a end => b
+            _               => arg
+        end)
+    end
+    return ret
+end
