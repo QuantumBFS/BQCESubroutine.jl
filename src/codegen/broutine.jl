@@ -490,9 +490,9 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     # end
 
     for t in 1:n-1
-        # TODO: for n>=3, we must replace the symbol index(t+1) with the symbol "base" in lheads[t+2]
-        tbody = subspace_step_expanded(kernel, lheads[t+2:end], index, ctx, brt) do x
-            subspace_locs = Expr(:tuple, :(1:$m...), [:($plain_locs[$k]) for k in n-t:n]...)
+        lheads_t_plus_1 = :($(index(t+1)) = $(index(t)) : $(step_h(ctx,n-t)) : $(index(t)) + (1<<$m) - $(step_h(ctx,n-t)))
+        tbody = subspace_step_expanded(kernel, [lheads_t_plus_1, lheads[t+2:end]...], index, ctx, brt) do x
+            subspace_locs = Expr(:tuple, :(1:$m...), [:($plain_locs[$k]) for k in n-t+1:n]...)
             subspace_head = :($base = $bsubspace($nqubits, $subspace_locs))
             # Expr(:for, subspace_head, x)
             :(Threads.@threads $(Expr(:for, subspace_head, x)))
@@ -500,8 +500,8 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
 
         push!(ret.args, :(
             if $nlocs_needed ≤ $nqubits - $plain_locs[$(n-t)] - $t
-                $m = $nqubits - $nlocs_needed - ($t+1)
-                $(replace_symbol(tbody, index(t+1), base))
+                $m = $nqubits - $nlocs_needed - $t
+                $(replace_symbol(tbody, index(t), base))
                 return $(ctx.st)
             end
         ))
