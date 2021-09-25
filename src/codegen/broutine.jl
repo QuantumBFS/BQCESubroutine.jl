@@ -481,13 +481,13 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
         end
     ))
 
-    # if n == 1
-    #     push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
-    #     return ret
-    # elseif n == 2
-    #     push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
-    #     return ret
-    # end
+    if n == 1
+        push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
+        return ret
+    elseif n == 2
+        push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
+        return ret
+    end
 
     for t in 1:n-1
         lheads_t_plus_1 = :($(index(t+1)) = $base : $(step_h(ctx,n-t)) : $base + (1<<$m) - $(step_h(ctx,n-t)))
@@ -554,6 +554,7 @@ function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::B
         m_max         ..........
     =#
     return quote
+        #println("threaded_subspace_loop_2x2_nontrivial")
         @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
             $k_highbits = $k_continuous & $mask_highbits
             $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
@@ -576,12 +577,9 @@ function threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx::BitContext, brt::B
     @def ctx.hoisted_vars n_lowlocs = $(ctx.hoisted_vars.nqubits) - $n_highlocs
     @def ctx.hoisted_vars loc_1 = $(ctx.hoisted_vars.plain_locs)[1]
     @def ctx.hoisted_vars loc_2 = $(ctx.hoisted_vars.plain_locs)[2]
-    @def ctx.hoisted_vars mask_highbits = -1 << $loc_2
-    @def ctx.hoisted_vars mask_lowbits = $(step_l(ctx, 2)) - 1
-    @def ctx.hoisted_vars mask_m_high = ( (1 << ($n_lowlocs - 1 - $loc_1)) - 1 ) << $loc_1
-    @def ctx.hoisted_vars mask_m_low = $(step_l(ctx, 1)) - 1
 
-    @gensym k_continuous k_highbits k_lowbits
+    @gensym mask_highbits mask_midbits mask_lowbits mask_m_high mask_m_low
+    @gensym k_continuous k_highbits k_midbits k_lowbits
     @gensym k m_max m_continuous m
     kernel = kernel_expr(f_kernel, ctx)
 
@@ -602,15 +600,20 @@ function threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx::BitContext, brt::B
     =#
     push!(ret.args, quote
         if $(ctx.hoisted_vars.nlocs_needed) ≤ $(ctx.hoisted_vars.nqubits) - $loc_1 - 1
-            println("threaded_subspace_loop_4x4_nontrivial (Case #1)")
+            #println("threaded_subspace_loop_4x4_nontrivial (Case #1)")
+            $mask_highbits = -1 << $loc_2
+            $mask_lowbits = $(step_h(ctx, 2)) - 1
+            $mask_m_high = ( (1 << ($n_lowlocs - 1 - $loc_1)) - 1 ) << ($loc_1 - 1)
+            $mask_m_low = $(step_l(ctx, 1)) - 1
             @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
                 $k_highbits = $k_continuous & $mask_highbits
                 $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
                 $k = $k_highbits | $k_lowbits
                 $m_max  = (1 << ($n_lowlocs-2)) - 1
-                for $m_continuous in $k : $k | $m_max
+                for $m_continuous in 0 : $m_max
                     $m = (($m_continuous & $mask_m_high) << 1) | ($m_continuous & $mask_m_low)
-                    $(kernel(m))
+                    #println($k_continuous, " ", $k, " ", $m_continuous, " ", $m)
+                    $(kernel(:($k | $m)))
                 end
             end
             return $(ctx.st)
@@ -630,9 +633,20 @@ function threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx::BitContext, brt::B
         m_max         ..........xxx
     =#
     push!(ret.args, quote
+        #println("threaded_subspace_loop_4x4_nontrivial (Case #2)")
+        $mask_highbits = -1 << $loc_2
+        $mask_midbits = ((1 << ($loc_2 - ($loc_1+1))) - 1) << ($loc_1+1)
+        $mask_lowbits = (1 << ($loc_1+1)) - 1
         @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
-            println("threaded_subspace_loop_4x4_nontrivial (Case #2)")
-            # TODO
+            $k_highbits = $k_continuous & $mask_highbits
+            $k_midbits = ($k_continuous & $mask_midbits) >>> 1
+            $k_lowbits = ($k_continuous & $mask_lowbits) >>> 2
+            $k = $k_highbits | $k_midbits | $k_lowbits
+            $m_max = (1 << ($n_lowlocs-2)) - 1
+            for $m in $k : $k | $m_max
+                #println($k_continuous, " k_highbits=", $k_highbits, " k_midbits=", $k_midbits, " k_lowbits=", $k_lowbits, " k=", $k, " m_max=", $m_max, " m=", $m)
+                $(kernel(m))
+            end
         end
         return $(ctx.st)
     end)
