@@ -16,15 +16,15 @@ println("nthreads=$(nthreads), N=$(N), loc=$(YaoLocations.plain(locs)[begin])")
 if nthreads == 1
     BQCESubroutine.disable_threads()
     print("(:X)      ");
-    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X), $locs)
+    @btime st0 = broutine!($(rand(Float64, 1<<N)), Val(:X), $locs)
     print("(:X_test) ");
-    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X_test), $locs)
+    @btime st0 = broutine!($(rand(Float64, 1<<N)), Val(:X_test), $locs)
 else
     BQCESubroutine.enable_threads()
     print("(:X)      ");
-    @btime st0 = threaded_basic_broutine!(${rand(Float64, 1<<N)}, Val(:X), $locs)
+    @btime st0 = threaded_basic_broutine!($(rand(Float64, 1<<N)), Val(:X), $locs)
     print("(:X_test) ")
-    @btime st0 = broutine!(${rand(Float64, 1<<N)}, Val(:X_test), $locs)
+    @btime st0 = broutine!($(rand(Float64, 1<<N)), Val(:X_test), $locs)
 end
 
 # N = 20;
