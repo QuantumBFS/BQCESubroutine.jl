@@ -5,11 +5,12 @@ using BenchmarkTools
 using LinearAlgebra
 using BQCESubroutine
 using YaoLocations
+using Polyester
 
 function X_gate_128_threads_MWE_simple_version!(st::AbstractVector{T} where T, nqubits::Int, loc::Int)
     space = BQCESubroutine.bsubspace(nqubits, (loc,))
     var"##step_1_l#1030" = 1<<(loc-1)
-    Threads.@threads for base in space
+    @batch for base in space
         for var"##idx#1027_1" in 0:0
             var"##I#1036_1" = Base.FastMath.add_fast(Base.FastMath.add_fast(base, var"##idx#1027_1"), 1)
             var"##I#1036_2" = Base.FastMath.add_fast(Base.FastMath.add_fast(Base.FastMath.add_fast(base, var"##idx#1027_1"), var"##step_1_l#1030"), 1)
@@ -42,7 +43,7 @@ function X_gate_128_threads_MWE!(var"##st#390"::AbstractVector{T} where T, ::Val
                                 begin
                                     begin
                                         if Base.FastMath.eq_fast(var"##step_1_l#398", 1)
-                                            Threads.@threads for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
+                                            @batch for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
                                                 begin
                                                     nothing
                                                     begin
@@ -58,7 +59,7 @@ function X_gate_128_threads_MWE!(var"##st#390"::AbstractVector{T} where T, ::Val
                                             return var"##st#390"
                                         end
                                     end
-                                    Threads.@threads for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
+                                    @batch for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
                                         for var"##idx#395_2" = var"##idx#395_1":1:Base.FastMath.sub_fast(Base.FastMath.add_fast(var"##idx#395_1", var"##step_1_l#398"), 1)
                                             begin
                                                 begin
@@ -80,7 +81,7 @@ function X_gate_128_threads_MWE!(var"##st#390"::AbstractVector{T} where T, ::Val
                             end
                             begin
                                 var"##m#397" = Base.max(0, Base.FastMath.sub_fast(Base.FastMath.sub_fast(var"##nqubits#393", var"##nlocs_needed#394"), 1))
-                                Threads.@threads for var"##base#396" = (BQCESubroutine.bsubspace)(var"##nqubits#393", (1:var"##m#397"..., var"##plain_locs#392"...))
+                                @batch for var"##base#396" = (BQCESubroutine.bsubspace)(var"##nqubits#393", (1:var"##m#397"..., var"##plain_locs#392"...))
                                     for var"##idx#395_1" = 0:Base.FastMath.sub_fast(1 << var"##m#397", 1)
                                         begin
                                             nothing
