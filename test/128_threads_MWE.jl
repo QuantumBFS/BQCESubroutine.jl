@@ -9,7 +9,7 @@ using YaoLocations
 function X_gate_loc_1_128_threads_MWE!(st::AbstractVector{T} where T, nqubits::Int)
     space = BQCESubroutine.bsubspace(nqubits, (1,))
     var"##step_1_l#1030" = 1
-    for base in space
+    Threads.@threads for base in space
         for var"##idx#1027_1" in 0:0
             var"##I#1036_1" = Base.FastMath.add_fast(Base.FastMath.add_fast(base, var"##idx#1027_1"), 1)
             var"##I#1036_2" = Base.FastMath.add_fast(Base.FastMath.add_fast(Base.FastMath.add_fast(base, var"##idx#1027_1"), var"##step_1_l#1030"), 1)
