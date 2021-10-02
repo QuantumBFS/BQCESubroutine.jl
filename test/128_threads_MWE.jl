@@ -68,13 +68,80 @@ function X_gate_loc_N_128_threads_MWE_version_2!(var"##st#390"::AbstractVector{T
     return var"##st#390"
 end
 
+function X_gate_loc_1_128_threads_MWE!(var"##st#390"::AbstractVector{T} where T, ::Val{:X}, var"##locs#391"::YaoLocations.Locations)
+    begin
+        nothing
+        begin
+            begin
+                var"##plain_locs#392" = (YaoLocations.plain)(var"##locs#391")
+                var"##nqubits#393" = (BQCESubroutine.log2i)(size(var"##st#390", 1))
+                var"##nlocs_needed#394" = (BQCESubroutine.log2i)(Threads.nthreads() - 1) + 1
+                var"##step_1_l#398" = 1 << (var"##plain_locs#392"[1] - 1)
+                var"##step_1_h#399" = 1 << var"##plain_locs#392"[1]
+            end
+            begin
+            end
+            begin
+                eval(Expr(:inbounds, true))
+                local var"#505#val" = begin
+                            if var"##nlocs_needed#394" ≤ Base.FastMath.sub_fast(var"##nqubits#393", var"##plain_locs#392"[1])
+                                begin
+                                    begin
+                                        if Base.FastMath.eq_fast(var"##step_1_l#398", 1)
+                                            for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
+                                                begin
+                                                    nothing
+                                                    begin
+                                                        var"##I#400_1" = Base.FastMath.add_fast(Base.FastMath.add_fast(var"##idx#395_1", 0), 1)
+                                                        var"##I#400_2" = Base.FastMath.add_fast(Base.FastMath.add_fast(Base.FastMath.add_fast(var"##idx#395_1", 0), var"##step_1_l#398"), 1)
+                                                        var"##T#401_1" = var"##st#390"[var"##I#400_2"]
+                                                        var"##T#401_2" = var"##st#390"[var"##I#400_1"]
+                                                        var"##st#390"[var"##I#400_1"] = var"##T#401_1"
+                                                        var"##st#390"[var"##I#400_2"] = var"##T#401_2"
+                                                    end
+                                                end
+                                            end
+                                            return var"##st#390"
+                                        end
+                                    end
+                                    for var"##idx#395_1" = 0:var"##step_1_h#399":Base.FastMath.sub_fast(size(var"##st#390", 1), var"##step_1_h#399")
+                                        for var"##idx#395_2" = var"##idx#395_1":1:Base.FastMath.sub_fast(Base.FastMath.add_fast(var"##idx#395_1", var"##step_1_l#398"), 1)
+                                            begin
+                                                begin
+                                                    nothing
+                                                    begin
+                                                        var"##I#402_1" = Base.FastMath.add_fast(Base.FastMath.add_fast(var"##idx#395_2", 0), 1)
+                                                        var"##I#402_2" = Base.FastMath.add_fast(Base.FastMath.add_fast(Base.FastMath.add_fast(var"##idx#395_2", 0), var"##step_1_l#398"), 1)
+                                                        var"##T#403_1" = var"##st#390"[var"##I#402_2"]
+                                                        var"##T#403_2" = var"##st#390"[var"##I#402_1"]
+                                                        var"##st#390"[var"##I#402_1"] = var"##T#403_1"
+                                                        var"##st#390"[var"##I#402_2"] = var"##T#403_2"
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                                return var"##st#390"
+                            end
+                            return var"##st#390"
+                        end
+                eval(Expr(:inbounds, :pop))
+                var"#505#val"
+            end
+        end
+    end
+    return var"##st#390"
+end
+
 Threads.nthreads()
 @testset "N=$N" for N in 4:15
-    loc = N
+    loc = 1
     st = rand(Float64, 1<<N);
     locs = BQCESubroutine.Locations(loc);
     #st0 = X_gate_loc_N_128_threads_MWE_version_1!(copy(st), N);
-    st0 = X_gate_loc_N_128_threads_MWE_version_2!(copy(st), Val(:X), locs);
+    #st0 = X_gate_loc_N_128_threads_MWE_version_2!(copy(st), Val(:X), locs);
+    st0 = X_gate_loc_1_128_threads_MWE!(copy(st), Val(:X), locs);
     st1 = broutine!(copy(st), [0 1; 1 0], locs);
     println("N=$N, loc=$loc, |err| = ", norm(st0-st1))
     @test st0 ≈ st1
