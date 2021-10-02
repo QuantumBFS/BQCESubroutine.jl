@@ -481,13 +481,13 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
         end
     ))
 
-    if n == 1
-        push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
-        return ret
-    elseif n == 2
-        push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
-        return ret
-    end
+    # if n == 1
+    #     push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # elseif n == 2
+    #     push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # end
 
     for t in 1:n-1
         lheads_t_plus_1 = :($(index(t+1)) = $base : $(step_h(ctx,n-t)) : $base + (1<<$m) - $(step_h(ctx,n-t)))
