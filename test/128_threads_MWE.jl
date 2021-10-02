@@ -81,7 +81,7 @@ function X_gate_128_threads_MWE!(var"##st#390"::AbstractVector{T} where T, ::Val
                             end
                             begin
                                 var"##m#397" = Base.max(0, Base.FastMath.sub_fast(Base.FastMath.sub_fast(var"##nqubits#393", var"##nlocs_needed#394"), 1))
-                                @batch for var"##base#396" = (BQCESubroutine.bsubspace)(var"##nqubits#393", (1:var"##m#397"..., var"##plain_locs#392"...))
+                                Threads.@threads for var"##base#396" = (BQCESubroutine.bsubspace)(var"##nqubits#393", (1:var"##m#397"..., var"##plain_locs#392"...))
                                     for var"##idx#395_1" = 0:Base.FastMath.sub_fast(1 << var"##m#397", 1)
                                         begin
                                             nothing
