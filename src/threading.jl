@@ -21,7 +21,8 @@ function threads_m(ex::Expr, min_threads_len::Int=1024)
     enable = GlobalRef(BQCESubroutine, :ENABLE_THREADS)
     return quote
         if $enable[] && length($range) > $min_threads_len
-            Threads.@threads $ex
+            # Threads.@threads $ex
+            Polyester.@batch per=thread $ex
         else
             $ex
         end

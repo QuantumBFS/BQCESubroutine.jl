@@ -1,5 +1,4 @@
 using BQCESubroutine
-using BQCESubroutine.Utilities
 using LinearAlgebra
 using YaoLocations: YaoLocations, plain, Locations, CtrlLocations, merge_locations
 using Test
@@ -16,6 +15,7 @@ using BQCESubroutine: threaded_basic_broutine!, basic_broutine!, threaded_multi_
 
 st = rand(ComplexF64, 1 << 10);
 locs = Locations((9, 10))
+locs = Locations(10)
 threaded_basic_broutine!(copy(st), Val(:PSWAP), locs, 2.0) ≈ basic_broutine!(copy(st), Val(:PSWAP), locs, 2.0)
 broutine!(copy(st), Val(:Z), locs) ≈ broutine!(copy(st), BQCESubroutine.BZ, locs)
 threaded_basic_broutine!(copy(st), Val(:Z), locs) ≈ broutine!(copy(st), BQCESubroutine.BZ, locs)
