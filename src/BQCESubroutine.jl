@@ -12,18 +12,23 @@ using StrideArrays
 using StrideArrays: StrideArray
 using Polyester: @batch
 using ArrayInterface
+using CUDA
 
 include("utils2.jl")
 include("schedule.jl")
 include("subspace/bit.jl")
 include("mul/mul.jl")
+include("mul/mul_X_test.jl")
+include("mul/mul_X_test_gpu.jl")
 include("routine/bit.jl")
 include("threading.jl")
 
+# include("utils.jl")
+# using .Utilities
+
 include("codegen/utils.jl")
 include("codegen/broutine.jl")
-
-# define concrete gates
-# include("statevector.jl")
+# include("mul.jl")
+include("statevector.jl")
 
 end

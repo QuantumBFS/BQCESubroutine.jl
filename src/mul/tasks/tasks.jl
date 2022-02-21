@@ -2,7 +2,7 @@
 # multi-threading task
 ########################
 
-@inline function subspace_mul_generic_task!(S::AbstractVector, indices, U::AbstractMatrix, subspace, range, offset)
+@inline function subspace_mul_generic_task!(S::AbstractVector{T}, indices, U::AbstractMatrix, subspace, range, offset) where T
     D = StrideArrays.static_length(indices)
     y = StrideArray{T}(undef, (D, ))
     if D == 4
@@ -19,7 +19,7 @@
     return
 end
 
-@inline function subspace_mul_generic_task!(S::AbstractMatrix, indices, U::AbstractMatrix, subspace, range, offset)
+@inline function subspace_mul_generic_task!(S::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, range, offset) where T
     D = StrideArrays.static_length(indices)
     stride = size(S, 1)
     y = StrideArray{T}(undef, (D, ))

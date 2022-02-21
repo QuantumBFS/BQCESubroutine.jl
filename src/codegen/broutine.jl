@@ -230,8 +230,9 @@ function codegen_broutine(ctx::BitContext, brt::BitRoutine)
         if size(brt) == 2
             multi = forward_routine(:multi_broutine2x2!, ctx, brt)
             push!(basic_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
+        else
+            push!(basic_ret.args, assertion)
         end
-        push!(basic_ret.args, assertion)
         push!(basic_ret.args, forward_routine(:basic_broutine!, ctx, brt))
         push!(basic_ret.args, :(return $(ctx.st)))
 
@@ -239,8 +240,9 @@ function codegen_broutine(ctx::BitContext, brt::BitRoutine)
         if size(brt) == 2
             multi = forward_routine(:threaded_multi_broutine2x2!, ctx, brt)
             push!(threaded_ret.args, :(length($(ctx.locs)) == 1 || return $multi) )
+        else
+            push!(threaded_ret.args, assertion)
         end
-        push!(threaded_ret.args, assertion)
         push!(threaded_ret.args, forward_routine(:threaded_basic_broutine!, ctx, brt))
         push!(threaded_ret.args, :(return $(ctx.st)))
         return quote
@@ -321,7 +323,7 @@ function diagonal_loop(f_kernel, ctx::BitContext)
     expanded = expand_loop(kernel, 0, :($(space_length(ctx)) - 1), ctx.expand_sz, ctx.threading)
     if ctx.threading
         src = :(
-            Threads.@threads for $m = 0:($(space_length(ctx)) - 1)
+            @batch for $m = 0:($(space_length(ctx)) - 1)
                 $(kernel(m))
             end
         )
@@ -380,13 +382,27 @@ function subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     end
 end
 
+"""
+Return a `Vector` of the range `Expr`s of nested for-loop indices `idx(1)`, `idx(2)`, ..., `idx(n)`,
+where `n` is the number of qubits the gate operates on.
+Note that the innermost for-loop (`idx(n+1)`) is not included.
+"""
 function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
     def_strides!(ctx, brt)
     n = log2i(size(brt))
     lheads = []
     push!(lheads, :($(idx(1)) = 0:$(step_h(ctx, n)):$(space_length(ctx))-$(step_h(ctx, n))))
 
-    # b2 in b1:step_1_h:b1+step_2_l-step_1_h
+    #=    b2 in b1:step_1_h:b1+step_2_l-step_1_h
+           ___________ step_h(n)
+          | __________ step_l(n)   == step_i_1_l
+          ||  ________ step_h(n-1) == step_i_h
+    loc:  |x |x x
+         0000000000
+         0100000000
+         1000000000
+         1100000000
+    =#
     for i in 2:n
         step_i_h = step_h(ctx, n-i+1)
         step_i_1_l = step_l(ctx, n-i+2)
@@ -395,6 +411,10 @@ function subspace_loop_head(idx, ctx::BitContext, brt::BitRoutine)
     return lheads
 end
 
+"""
+Return a block `Expr` containing one big nested for-loop whose innermost loop (inside `inner`) is unrolled.
+The innermost loop is fully unrolled if it contains no more than `1 << ctx.expand_sz` iterations.
+"""
 function subspace_step_expanded(outer, kernel, inner::Vector, idx, ctx::BitContext, brt::BitRoutine)
     n = log2i(size(brt))
     ret = Expr(:block)
@@ -434,6 +454,9 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
     @def ctx.hoisted_vars nqubits = $log2i($(space_length(ctx)))
     @def ctx.hoisted_vars nlocs_needed = $log2i(Threads.nthreads()-1) + 1
+    # nthreads      1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 ...
+    # nlocs_needed  0  1  2  2  3  3  3  3  4  4  4  4  4  4  4  4  5 ...
+
     @gensym idx base m
 
     kernel = kernel_expr(f_kernel, ctx)
@@ -446,9 +469,11 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     ret = Expr(:block)
     tbody = subspace_step_expanded(kernel, lheads[2:end], index, ctx, brt) do x
         # Expr(:for, lheads[1], x)
-        :(Threads.@threads $(Expr(:for, lheads[1], x)))
+        :(@batch $(Expr(:for, lheads[1], x)))
     end
     
+    # If the outermost loop is sufficient to show best performance of multithreading
+    # (i.e., xxx ≥ nthreads in "xxx0yyy0zzz")
     push!(ret.args, :(
         if $nlocs_needed ≤ $nqubits - $plain_locs[$n]
             $tbody
@@ -456,9 +481,18 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
         end
     ))
 
+    # if n == 1
+    #     push!(ret.args, threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # elseif n == 2
+    #     push!(ret.args, threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx, brt))
+    #     return ret
+    # end
+
     for t in 1:n-1
-        tbody = subspace_step_expanded(idx->kernel(:($base + $idx)), lheads[t+1:end], index, ctx, brt) do x
-            subspace_locs = Expr(:tuple, :(1:$m...), [:(plain_locs[$(n-k+1)]) for k in 1:t]...)
+        lheads_t_plus_1 = :($(index(t+1)) = $base : $(step_h(ctx,n-t)) : $base + (1<<$m) - $(step_h(ctx,n-t)))
+        tbody = subspace_step_expanded(kernel, [lheads_t_plus_1, lheads[t+2:end]...], index, ctx, brt) do x
+            subspace_locs = Expr(:tuple, :(1:$m...), [:($plain_locs[$k]) for k in n-t+1:n]...)
             subspace_head = :($base = $bsubspace($nqubits, $subspace_locs))
             # Expr(:for, subspace_head, x)
             :(Threads.@threads $(Expr(:for, subspace_head, x)))
@@ -474,7 +508,7 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     end
 
     push!(ret.args, quote
-        $m = $nqubits - $nlocs_needed - $n
+        $m = Base.max(0, $nqubits - $nlocs_needed - $n)
         Threads.@threads for $base in $bsubspace($nqubits, (1:$m..., $plain_locs...))
             for $(index(1)) in 0:(1 << $m)-1
                 $(kernel( index_base(1) ))
@@ -485,6 +519,139 @@ function threaded_subspace_loop(f_kernel, ctx::BitContext, brt::BitRoutine)
     return ret
 end
 
+"""
+The gate operates on 1 qubit,
+and with outermost loop only it is *insufficient* to show best performance of multithreading.
+"""
+function threaded_subspace_loop_2x2_nontrivial(f_kernel, ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars n_highlocs = Base.min($(ctx.hoisted_vars.nlocs_needed), $(ctx.hoisted_vars.nqubits) - 1)
+    @def ctx.hoisted_vars n_lowlocs = $(ctx.hoisted_vars.nqubits) - $n_highlocs
+    @def ctx.hoisted_vars mask_highbits = -1 << $(ctx.hoisted_vars.plain_locs)[1]
+    @def ctx.hoisted_vars mask_lowbits = (1 << $(ctx.hoisted_vars.plain_locs)[1]) - 1
+
+    @gensym k_continuous k_highbits k_lowbits
+    @gensym k m_max m
+    kernel = kernel_expr(f_kernel, ctx)
+
+    #=     Example
+        mask_highbits 1100000000
+        mask_lowbits  0011111111
+        highlocs      xxxxxx....     parallelized on n_highlocs bits
+        lowlocs       ......xxxx     sequential on (n_lowlocs - 1) bits
+        locs          ..x.......
+        k_highbits    xx........
+        k_lowbits     ...xxxx...
+        m_max         .......xxx
+    =#
+    #=     Another example
+        mask_highbits 0000000000
+        mask_lowbits  1111111111
+        highlocs      xxxxxxxxx.     parallelized on n_highlocs bits
+        lowlocs       .........x     sequential on (n_lowlocs - 1) bits
+        locs          x.........
+        k_highbits    ..........
+        k_lowbits     .xxxxxxxxx
+        m_max         ..........
+    =#
+    return quote
+        @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
+            $k_highbits = $k_continuous & $mask_highbits
+            $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
+            $k = $k_highbits | $k_lowbits
+            $m_max  = (1 << ($n_lowlocs-1)) - 1
+            for $m in $k : $k | $m_max
+                $(kernel(m))
+            end
+        end
+        return $(ctx.st)
+    end
+end
+
+"""
+The gate operates on 2 qubits,
+and with outermost loop only it is *insufficient* to show best performance of multithreading.
+"""
+function threaded_subspace_loop_4x4_nontrivial(f_kernel, ctx::BitContext, brt::BitRoutine)
+    @def ctx.hoisted_vars n_highlocs = Base.min($(ctx.hoisted_vars.nlocs_needed), $(ctx.hoisted_vars.nqubits) - 2)
+    @def ctx.hoisted_vars n_lowlocs = $(ctx.hoisted_vars.nqubits) - $n_highlocs
+    @def ctx.hoisted_vars loc_1 = $(ctx.hoisted_vars.plain_locs)[1]
+    @def ctx.hoisted_vars loc_2 = $(ctx.hoisted_vars.plain_locs)[2]
+
+    @gensym mask_highbits mask_midbits mask_lowbits mask_m_high mask_m_low
+    @gensym k_continuous k_highbits k_midbits k_lowbits
+    @gensym k m_max m_continuous m
+    kernel = kernel_expr(f_kernel, ctx)
+
+    ret = Expr(:block)
+
+    #= Case #1: xxxyyy ≥ nthreads in "xxx0yyy0zzz"
+        mask_highbits 1100000000000
+        mask_lowbits  0011111111111
+        highlocs      xxxxxx.......   parallelized on n_highlocs bits
+        lowlocs       ......xxxxxxx   sequential on (n_lowlocs - 2) bits
+        locs          ..x......x...
+        k_highbits    xx...........
+        k_lowbits     ...xxxx......
+        m_max         ........xxxxx
+        mask_m_high   ........xx...
+        mask_m_low    ..........xxx
+        m             .......xx.xxx
+    =#
+    push!(ret.args, quote
+        if $(ctx.hoisted_vars.nlocs_needed) ≤ $(ctx.hoisted_vars.nqubits) - $loc_1 - 1
+            $mask_highbits = -1 << $loc_2
+            $mask_lowbits = $(step_h(ctx, 2)) - 1
+            $mask_m_high = ( (1 << ($n_lowlocs - 1 - $loc_1)) - 1 ) << ($loc_1 - 1)
+            $mask_m_low = $(step_l(ctx, 1)) - 1
+            @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
+                $k_highbits = $k_continuous & $mask_highbits
+                $k_lowbits = ($k_continuous & $mask_lowbits) >>> 1
+                $k = $k_highbits | $k_lowbits
+                $m_max  = (1 << ($n_lowlocs-2)) - 1
+                for $m_continuous in 0 : $m_max
+                    $m = (($m_continuous & $mask_m_high) << 1) | ($m_continuous & $mask_m_low)
+                    $(kernel(:($k | $m)))
+                end
+            end
+            return $(ctx.st)
+        end
+    end)
+
+    #= Case #2: xxxyyy < nthreads in "xxx0yyy0zzz"
+        mask_highbits 1100000000000
+        mask_midbits  0011100000000
+        mask_lowbits  0000011111111
+        highlocs      xxxxxxxx.....   parallelized on n_highlocs bits
+        lowlocs       ........xxxxx   sequential on (n_lowlocs - 2) bits
+        locs          ..x...x......
+        k_highbits    xx...........
+        k_midbits     ...xxx.......
+        k_lowbits     .......xxx...
+        m_max         ..........xxx
+    =#
+    push!(ret.args, quote
+        $mask_highbits = -1 << $loc_2
+        $mask_midbits = ((1 << ($loc_2 - ($loc_1+1))) - 1) << ($loc_1+1)
+        $mask_lowbits = (1 << ($loc_1+1)) - 1
+        @batch for $k_continuous in 0 : 1<<$n_lowlocs : ((1<<$n_highlocs)-1) << $n_lowlocs
+            $k_highbits = $k_continuous & $mask_highbits
+            $k_midbits = ($k_continuous & $mask_midbits) >>> 1
+            $k_lowbits = ($k_continuous & $mask_lowbits) >>> 2
+            $k = $k_highbits | $k_midbits | $k_lowbits
+            $m_max = (1 << ($n_lowlocs-2)) - 1
+            for $m in $k : $k | $m_max
+                $(kernel(m))
+            end
+        end
+        return $(ctx.st)
+    end)
+    return ret
+end
+
+"""
+Loop unrolling with a fully static block (exactly `1 << max` iterations)
+and a dynamic block (less than `1 << max` iterations near the end)
+"""
 function expand_loop(f_kernel, lb, ub, max::Int=3, threading=false)
     @gensym idx1 idx2 idx3 Mmax mmax upperbound
     N = 1 << max
@@ -507,7 +674,7 @@ function expand_loop(f_kernel, lb, ub, max::Int=3, threading=false)
     threading && return quote
         $upperbound = $ub
         $Mmax = $ub - $lb
-        Threads.@threads $lbody
+        @batch $lbody
     end
 
     return quote

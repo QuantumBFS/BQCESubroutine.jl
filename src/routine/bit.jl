@@ -28,6 +28,17 @@ function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations)
     return st
 end
 
+# specialize on the X gate
+function broutine!(st::AbstractVecOrMat, U::Val{:X_test}, locs::Locations)
+    #println("broutine! Val{:X_test}")
+    @assert 1 == length(locs) "operator dimension mismatch locs"
+    n = log2dim(st)
+    loc = plain(locs)[begin]
+    @assert n >= loc "locs is too large"
+    subspace_mul!(st, U, loc)
+    return st
+end
+
 function broutine!(st::AbstractVecOrMat, U::AbstractMatrix, locs::Locations, ctrl::CtrlLocations)
     size(U, 1) == 2 && return broutine2x2!(st, U, locs, ctrl)
     @assert log2dim(U) == length(locs) "operator dimension mismatch locs"
