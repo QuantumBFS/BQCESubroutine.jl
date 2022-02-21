@@ -23,12 +23,9 @@ include("mul/mul_X_test_gpu.jl")
 include("routine/bit.jl")
 include("threading.jl")
 
-# include("utils.jl")
-# using .Utilities
-
 include("codegen/utils.jl")
 include("codegen/broutine.jl")
-# include("mul.jl")
+
 include("statevector.jl")
 
 end
