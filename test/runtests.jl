@@ -5,4 +5,5 @@ using Test
 
 @testset "broutine" begin
     include("broutine.jl")
+    include("schedule.jl")
 end

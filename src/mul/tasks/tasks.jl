@@ -7,12 +7,12 @@
     y = StrideArray{T}(undef, (D, ))
     if D == 4
         for s in range
-            k = subspace[s]
+            k = subspace[s] + 1
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, offset)
         end
     else
         for s in range
-            k = subspace[s]
+            k = subspace[s] + 1
             subspace_mul_kernel_generic!(S, y, indices, U, k, offset)
         end
     end
@@ -21,16 +21,16 @@ end
 
 @inline function subspace_mul_generic_task!(S::AbstractMatrix{T}, indices, U::AbstractMatrix, subspace, range, offset) where T
     D = StrideArrays.static_length(indices)
-    stride = size(S, 1)
+    # stride = size(S, 1)
     y = StrideArray{T}(undef, (D, ))
     if D == 4
         for (b, s) in range
-            k = subspace[s]
+            k = subspace[s] + 1
             subspace_mul_kernel_generic_4x4!(S, y, indices, U, k, b, offset)
         end
     else
         for (b, s) in range
-            k = subspace[s]
+            k = subspace[s] + 1
             subspace_mul_kernel_generic!(S, y, indices, U, k, b, offset)
         end
     end

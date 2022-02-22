@@ -12,7 +12,7 @@ function Base.iterate(s::CartesianSpace, st=1)
 end
 
 function Base.getindex(s::CartesianSpace{1}, idx::Int)
-    return idx + s.offsets[1]
+    return idx + s.offsets[1] - 1
 end
 
 function Base.getindex(s::CartesianSpace{2}, idx::Int)
@@ -78,6 +78,7 @@ Base.getindex(it::CartesianPartition, idx::Int) = it.space[idx]
 function Base.iterate(it::CartesianPartition, st::Int=it.from)
     st > it.to && return
     return it.space[st], st + 1
+    return st, st + 1
 end
 
 CartesianSpace(::AbstractVector, subspace) = CartesianSpace(1:length(subspace))

@@ -98,7 +98,7 @@ end
 function threaded_subspace_mul_generic!(S::AbstractVecOrMat, indices, U::AbstractMatrix, subspace, offset=0)
     nthreads = Threads.nthreads()
     space = CartesianSpace(S, subspace)
-    for tid in 1:nthreads
+    @batch for tid in 1:nthreads
         range = schedule_task(space, tid, nthreads)
         subspace_mul_generic_task!(S, indices, U, subspace, range, offset)
     end
