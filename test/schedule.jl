@@ -1,4 +1,3 @@
-using BenchmarkTools
 using BQCESubroutine
 using BQCESubroutine: CartesianSpace, CartesianPartition, 
     broutine!, threaded_subspace_mul_generic!
