@@ -7,6 +7,8 @@ function multi_broutine2x2! end
 function threaded_basic_broutine! end
 function threaded_multi_broutine2x2! end
 
+function basic_broutine_kernel! end
+
 struct BitRoutine
     name::Symbol
     sz::Int
@@ -138,6 +140,12 @@ step_h(i::Int) = Symbol(:step, :_, i, :_h)
 step_l(ctx::BitContext, i::Int) = getproperty(ctx.hoisted_vars, step_l(i))
 step_h(ctx::BitContext, i::Int) = getproperty(ctx.hoisted_vars, step_h(i))
 space_length(ctx::BitContext) = ctx.batch ? :(size($(ctx.st), 2)) : :(size($(ctx.st), 1))
+
+"""
+    refst(ctx, i, b)
+
+generate `st[i]` and `st[i, b]`.
+"""
 refst(ctx::BitContext, i, b = nothing) = b === nothing ? :($(ctx.st)[$i]) : :($(ctx.st)[$b, $i])
 
 function def_strides!(ctx::BitContext, brt::BitRoutine)
@@ -149,6 +157,11 @@ function def_strides!(ctx::BitContext, brt::BitRoutine)
     return ctx
 end
 
+"""
+    codegen_method(f_body, ctx::BitContext, brt::BitRoutine, name::Symbol)
+
+generate a function method based on the body and name.
+"""
 function codegen_method(f_body, ctx::BitContext, brt::BitRoutine, name::Symbol)
     T = ctx.batch ? AbstractMatrix : AbstractVector
     args = Any[:($(ctx.st)::$T), :(::Val{$(QuoteNode(brt.name))}), :($(ctx.locs)::$Locations)]
@@ -210,10 +223,14 @@ function broutine_m(m::Module, ex::Expr)
             )
         end
     end
+
     push!(ret.args, binding)
     return ret
 end
 
+"""
+    generate a function call
+"""
 function forward_routine(to::Symbol, ctx::BitContext, brt::BitRoutine)
     call = Expr(:call, GlobalRef(BQCESubroutine, to),
             ctx.st, Val(brt.name), ctx.locs)
@@ -700,6 +717,11 @@ function ctrl_expr(f_kernel, ctx::BitContext, m)
     return ret
 end
 
+"""
+    sort_locations(ctx, sz)
+
+sort locations when the qubit number `sz`
+"""
 function sort_locations(ctx::BitContext, sz::Int)
     sz == 1 && return
 
@@ -832,7 +854,10 @@ end
 function perm_kernel(ctx::BitContext, brt::BitRoutine)
     U12, U21 = brt.expr[1, 2], brt.expr[2, 1]
 
+    # kernel(m)
+    # generate the kernel corresponding to `m`
     function kernel(m)
+        # add ctrl condition
         ctrl_expr(ctx, m) do
             batch_loop(ctx) do b
                 @def ctx.hoisted_vars plain_locs = $plain($(ctx.locs))
@@ -892,6 +917,11 @@ function perm_kernel(ctx::BitContext, brt::BitRoutine)
                         end
                     end
                 end # @match
+
+                # X-gate
+                # temp = S1
+                # S1 = S2
+                # S2 = tmp
 
                 return quote
                     $tmp = $S1
